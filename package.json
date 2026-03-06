@@ -1,0 +1,29 @@
+{
+  "name": "clawchef",
+  "version": "0.1.0",
+  "description": "Recipe-driven OpenClaw environment orchestrator",
+  "type": "module",
+  "bin": {
+    "clawchef": "dist/index.js"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "dev": "tsx src/index.ts",
+    "typecheck": "tsc --noEmit -p tsconfig.json"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "commander": "^12.1.0",
+    "dotenv": "^16.4.7",
+    "js-yaml": "^4.1.0",
+    "zod": "^3.23.8"
+  },
+  "devDependencies": {
+    "@types/js-yaml": "^4.0.9",
+    "@types/node": "^22.13.13",
+    "tsx": "^4.19.3",
+    "typescript": "^5.8.2"
+  }
+}

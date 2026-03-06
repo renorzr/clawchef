@@ -1,0 +1,20 @@
+version: "1"
+name: "openclaw-telegram-channel"
+
+params:
+  openclaw_version:
+    default: "2026.2.9"
+  telegram_bot_token:
+    required: true
+
+openclaw:
+  provider: "command"
+  bin: "openclaw"
+  version: "${openclaw_version}"
+  install: "never"
+
+channels:
+  - channel: "telegram"
+    token: "${telegram_bot_token}"
+    account: "default"
+    login: true
