@@ -3,6 +3,8 @@ import path from "node:path";
 import process from "node:process";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { spawn } from "node:child_process";
+import { createInterface } from "node:readline/promises";
+import { stdin as input, stdout as output } from "node:process";
 import { ClawChefError } from "../errors.js";
 import type { AgentDef, ChannelDef, ConversationDef, OpenClawBootstrap, OpenClawSection } from "../types.js";
 import type { EnsureVersionResult, OpenClawProvider, ResolvedWorkspaceDef } from "./provider.js";
@@ -10,6 +12,7 @@ import type { EnsureVersionResult, OpenClawProvider, ResolvedWorkspaceDef } from
 const DEFAULT_COMMANDS = {
   use_version: "${bin} --version",
   install_version: "npm install -g openclaw@${version}",
+  uninstall_version: "npm uninstall -g openclaw",
   factory_reset: "${bin} reset --scope full --yes --non-interactive",
   start_gateway: "${bin} gateway start",
   enable_plugin: "${bin} plugins enable ${channel_q}",
@@ -152,6 +155,46 @@ function parseVersionOutput(output: string): string {
   return match?.[1] ?? output.trim();
 }
 
+type VersionMismatchChoice = "ignore" | "abort" | "force";
+
+async function chooseVersionMismatchAction(
+  currentVersion: string,
+  expectedVersion: string,
+  silent: boolean,
+): Promise<VersionMismatchChoice> {
+  if (silent) {
+    return "force";
+  }
+  if (!input.isTTY) {
+    throw new ClawChefError(
+      "OpenClaw version mismatch requires interactive terminal. Use --silent to force reinstall and continue.",
+    );
+  }
+
+  const rl = createInterface({ input, output });
+  try {
+    while (true) {
+      const answer = await rl.question(
+        [
+          `OpenClaw version mismatch detected: current ${currentVersion}, expected ${expectedVersion}`,
+          "Choose action:",
+          "  1) Ignore and continue",
+          "  2) Abort",
+          "  3) Force continue (uninstall + install expected version)",
+          "Enter 1/2/3 [default: 2]: ",
+        ].join("\n"),
+      );
+      const choice = answer.trim();
+      if (choice === "1") return "ignore";
+      if (choice === "2" || choice === "") return "abort";
+      if (choice === "3") return "force";
+      output.write("Invalid choice. Please enter 1, 2, or 3.\n");
+    }
+  } finally {
+    rl.close();
+  }
+}
+
 function buildPrompt(messages: StagedMessage[]): string {
   return messages.map((m) => `user: ${m.content}`).join("\n");
 }
@@ -229,11 +272,12 @@ function bootstrapRuntimeEnv(bootstrap: OpenClawBootstrap | undefined): Record<s
 export class CommandOpenClawProvider implements OpenClawProvider {
   private readonly stagedMessages = new Map<string, StagedMessage[]>();
 
-  async ensureVersion(config: OpenClawSection, dryRun: boolean): Promise<EnsureVersionResult> {
+  async ensureVersion(config: OpenClawSection, dryRun: boolean, silent: boolean): Promise<EnsureVersionResult> {
     const bin = config.bin ?? "openclaw";
     const installPolicy = config.install ?? "auto";
     const useCmd = commandFor(config, "use_version", { bin, version: config.version });
     const installCmd = commandFor(config, "install_version", { bin, version: config.version });
+    const uninstallCmd = commandFor(config, "uninstall_version", { bin, version: config.version });
 
     if (dryRun) {
       return { installedThisRun: false };
@@ -252,36 +296,6 @@ export class CommandOpenClawProvider implements OpenClawProvider {
       installedThisRun = true;
     }
 
-    if (config.commands?.use_version || config.commands?.install_version) {
-      if (!useCmd.trim()) {
-        return { installedThisRun };
-      }
-
-      if (installPolicy === "always") {
-        if (!installCmd.trim()) {
-          throw new ClawChefError("install=always requires openclaw.commands.install_version");
-        }
-        await runShell(installCmd, false);
-        installedThisRun = true;
-      }
-
-      try {
-        await runShell(useCmd, false);
-      } catch (err) {
-        if (installPolicy === "never" && !installedThisRun) {
-          throw err;
-        }
-        if (!installCmd.trim()) {
-          throw new ClawChefError("Requested version is unavailable and install_version is not configured");
-        }
-        await runShell(installCmd, false);
-        installedThisRun = true;
-        await runShell(useCmd, false);
-      }
-
-      return { installedThisRun };
-    }
-
     if (!useCmd.trim()) {
       return { installedThisRun };
     }
@@ -296,26 +310,53 @@ export class CommandOpenClawProvider implements OpenClawProvider {
       installedThisRun = true;
     }
 
-    const versionOut = await runShell(useCmd, false);
-    const currentVersion = parseVersionOutput(versionOut);
+    let currentVersion: string;
+    try {
+      const versionOut = await runShell(useCmd, false);
+      currentVersion = parseVersionOutput(versionOut);
+    } catch (err) {
+      if (installPolicy === "never" && !installedThisRun) {
+        throw err;
+      }
+      if (!installCmd.trim()) {
+        throw new ClawChefError("Requested version is unavailable and install_version is not configured");
+      }
+      await runShell(installCmd, false);
+      installedThisRun = true;
+      const versionOutAfterInstall = await runShell(useCmd, false);
+      currentVersion = parseVersionOutput(versionOutAfterInstall);
+    }
+
     if (currentVersion === config.version) {
       return { installedThisRun };
     }
 
-    if (installPolicy === "never" && !installedThisRun) {
+    if (installedThisRun) {
       throw new ClawChefError(
-        `OpenClaw version mismatch: current ${currentVersion}, expected ${config.version} (install=never)`,
+        `OpenClaw version mismatch after install: current ${currentVersion}, expected ${config.version}`,
       );
     }
 
+    const choice = await chooseVersionMismatchAction(currentVersion, config.version, silent);
+
+    if (choice === "ignore") {
+      return { installedThisRun: false };
+    }
+    if (choice === "abort") {
+      throw new ClawChefError("Aborted by user due to OpenClaw version mismatch");
+    }
+
+    if (!uninstallCmd.trim()) {
+      throw new ClawChefError("Force continue requires openclaw.commands.uninstall_version");
+    }
     if (!installCmd.trim()) {
-      throw new ClawChefError(
-        `Current version ${currentVersion} does not match expected ${config.version}; configure openclaw.commands.install_version`,
-      );
+      throw new ClawChefError("Force continue requires openclaw.commands.install_version");
     }
 
+    await runShell(uninstallCmd, false);
     await runShell(installCmd, false);
     installedThisRun = true;
+
     const versionOutAfter = await runShell(useCmd, false);
     const installedVersion = parseVersionOutput(versionOutAfter);
     if (installedVersion !== config.version) {

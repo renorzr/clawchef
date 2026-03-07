@@ -1,6 +1,6 @@
 import path from "node:path";
 import { homedir } from "node:os";
-import { mkdir, access, copyFile, writeFile } from "node:fs/promises";
+import { mkdir, access, copyFile, writeFile, readFile } from "node:fs/promises";
 import { constants } from "node:fs";
 import { createInterface } from "node:readline/promises";
 import { stdin as input, stdout as output } from "node:process";
@@ -9,6 +9,7 @@ import { ClawChefError } from "./errors.js";
 import { Logger } from "./logger.js";
 import { createProvider } from "./openclaw/factory.js";
 import type { Recipe, RunOptions } from "./types.js";
+import type { RecipeOrigin } from "./recipe.js";
 
 async function exists(filePath: string): Promise<boolean> {
   try {
@@ -26,11 +27,64 @@ function truncateForLog(text: string, maxLength = 500): string {
   return `${text.slice(0, maxLength)}... [truncated ${text.length - maxLength} chars]`;
 }
 
-function resolveWorkspacePath(recipeDir: string, name: string, configuredPath?: string): string {
+function resolveWorkspacePath(recipeOrigin: RecipeOrigin, name: string, configuredPath?: string): string {
   if (configuredPath?.trim()) {
-    return path.resolve(recipeDir, configuredPath);
+    if (path.isAbsolute(configuredPath)) {
+      return configuredPath;
+    }
+    if (recipeOrigin.kind === "local") {
+      return path.resolve(recipeOrigin.recipeDir, configuredPath);
+    }
+    return path.resolve(configuredPath);
   }
   return path.join(homedir(), ".openclaw", "workspaces", name);
+}
+
+function isHttpUrl(value: string): boolean {
+  try {
+    const url = new URL(value);
+    return url.protocol === "http:" || url.protocol === "https:";
+  } catch {
+    return false;
+  }
+}
+
+function resolveFileRef(recipeOrigin: RecipeOrigin, reference: string): { kind: "local" | "url"; value: string } {
+  if (isHttpUrl(reference)) {
+    return { kind: "url", value: reference };
+  }
+  if (path.isAbsolute(reference)) {
+    return { kind: "local", value: reference };
+  }
+  if (recipeOrigin.kind === "local") {
+    return { kind: "local", value: path.resolve(recipeOrigin.recipeDir, reference) };
+  }
+  return { kind: "url", value: new URL(reference, recipeOrigin.recipeUrl).toString() };
+}
+
+async function readTextFromRef(recipeOrigin: RecipeOrigin, reference: string): Promise<string> {
+  const resolved = resolveFileRef(recipeOrigin, reference);
+  if (resolved.kind === "local") {
+    return readFile(resolved.value, "utf8");
+  }
+  const response = await fetch(resolved.value);
+  if (!response.ok) {
+    throw new ClawChefError(`Failed to fetch file content from ${resolved.value}: HTTP ${response.status}`);
+  }
+  return response.text();
+}
+
+async function readBinaryFromRef(recipeOrigin: RecipeOrigin, reference: string): Promise<Buffer> {
+  const resolved = resolveFileRef(recipeOrigin, reference);
+  if (resolved.kind === "local") {
+    return readFile(resolved.value);
+  }
+  const response = await fetch(resolved.value);
+  if (!response.ok) {
+    throw new ClawChefError(`Failed to fetch file source from ${resolved.value}: HTTP ${response.status}`);
+  }
+  const bytes = await response.arrayBuffer();
+  return Buffer.from(bytes);
 }
 
 async function confirmFactoryReset(options: RunOptions): Promise<boolean> {
@@ -54,16 +108,16 @@ async function confirmFactoryReset(options: RunOptions): Promise<boolean> {
 
 export async function runRecipe(
   recipe: Recipe,
-  recipePath: string,
+  recipeOrigin: RecipeOrigin,
   options: RunOptions,
   logger: Logger,
 ): Promise<void> {
-  const provider = createProvider(recipe.openclaw);
-  const recipeDir = path.dirname(path.resolve(recipePath));
+  const provider = createProvider(options);
+  const remoteMode = options.provider === "remote";
   const workspacePaths = new Map<string, string>();
 
   logger.info(`Running recipe: ${recipe.name}`);
-  const versionResult = await provider.ensureVersion(recipe.openclaw, options.dryRun);
+  const versionResult = await provider.ensureVersion(recipe.openclaw, options.dryRun, options.silent);
   logger.info(`OpenClaw version ready: ${recipe.openclaw.version}`);
 
   if (versionResult.installedThisRun) {
@@ -78,9 +132,9 @@ export async function runRecipe(
   }
 
   for (const ws of recipe.workspaces ?? []) {
-    const absPath = resolveWorkspacePath(recipeDir, ws.name, ws.path);
+    const absPath = resolveWorkspacePath(recipeOrigin, ws.name, ws.path);
     workspacePaths.set(ws.name, absPath);
-    if (!options.dryRun) {
+    if (!options.dryRun && !remoteMode) {
       await mkdir(absPath, { recursive: true });
     }
     await provider.createWorkspace(recipe.openclaw, { ...ws, path: absPath }, options.dryRun);
@@ -106,6 +160,34 @@ export async function runRecipe(
     if (!wsPath) {
       throw new ClawChefError(`File target workspace does not exist: ${file.workspace}`);
     }
+
+    if (provider.materializeFile) {
+      let content = file.content;
+      if (content === undefined && file.content_from) {
+        if (!options.dryRun) {
+          content = await readTextFromRef(recipeOrigin, file.content_from);
+        } else {
+          const resolved = resolveFileRef(recipeOrigin, file.content_from);
+          content = `__dry_run_content_from__:${resolved.value}`;
+        }
+      }
+      if (content === undefined && file.source) {
+        if (!options.dryRun) {
+          content = await readTextFromRef(recipeOrigin, file.source);
+        } else {
+          const resolved = resolveFileRef(recipeOrigin, file.source);
+          content = `__dry_run_source__:${resolved.value}`;
+        }
+      }
+      if (content === undefined) {
+        throw new ClawChefError(`File ${file.path} requires content, content_from, or source`);
+      }
+
+      await provider.materializeFile(recipe.openclaw, file.workspace, file.path, content, file.overwrite, options.dryRun);
+      logger.info(`File materialized: ${file.workspace}/${file.path}`);
+      continue;
+    }
+
     const target = path.resolve(wsPath, file.path);
     const targetDir = path.dirname(target);
 
@@ -116,9 +198,17 @@ export async function runRecipe(
         logger.warn(`Skipping existing file: ${target}`);
       } else if (file.content !== undefined) {
         await writeFile(target, file.content, "utf8");
+      } else if (file.content_from) {
+        const content = await readTextFromRef(recipeOrigin, file.content_from);
+        await writeFile(target, content, "utf8");
       } else if (file.source) {
-        const src = path.resolve(recipeDir, file.source);
-        await copyFile(src, target);
+        const resolved = resolveFileRef(recipeOrigin, file.source);
+        if (resolved.kind === "local") {
+          await copyFile(resolved.value, target);
+        } else {
+          const content = await readBinaryFromRef(recipeOrigin, file.source);
+          await writeFile(target, content);
+        }
       }
     }
     logger.info(`File materialized: ${file.workspace}/${file.path}`);

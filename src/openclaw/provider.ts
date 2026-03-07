@@ -7,12 +7,20 @@ export interface EnsureVersionResult {
 }
 
 export interface OpenClawProvider {
-  ensureVersion(config: OpenClawSection, dryRun: boolean): Promise<EnsureVersionResult>;
+  ensureVersion(config: OpenClawSection, dryRun: boolean, silent: boolean): Promise<EnsureVersionResult>;
   factoryReset(config: OpenClawSection, dryRun: boolean): Promise<void>;
   startGateway(config: OpenClawSection, dryRun: boolean): Promise<void>;
   createWorkspace(config: OpenClawSection, workspace: ResolvedWorkspaceDef, dryRun: boolean): Promise<void>;
   configureChannel(config: OpenClawSection, channel: ChannelDef, dryRun: boolean): Promise<void>;
   loginChannel(config: OpenClawSection, channel: ChannelDef, dryRun: boolean): Promise<void>;
+  materializeFile?(
+    config: OpenClawSection,
+    workspace: string,
+    filePath: string,
+    content: string,
+    overwrite: boolean | undefined,
+    dryRun: boolean,
+  ): Promise<void>;
   createAgent(
     config: OpenClawSection,
     agent: AgentDef,

@@ -1,11 +1,35 @@
 import path from "node:path";
 import process from "node:process";
-import { readFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { spawn } from "node:child_process";
+import { readFile, mkdtemp, stat, writeFile, rm, mkdir } from "node:fs/promises";
 import YAML from "js-yaml";
 import { recipeSchema } from "./schema.js";
 import { ClawChefError } from "./errors.js";
 import { deepResolveTemplates } from "./template.js";
 import type { Recipe, RunOptions } from "./types.js";
+
+export type RecipeOrigin =
+  | {
+      kind: "local";
+      recipePath: string;
+      recipeDir: string;
+    }
+  | {
+      kind: "url";
+      recipeUrl: string;
+    };
+
+export interface LoadedRecipe {
+  recipe: Recipe;
+  origin: RecipeOrigin;
+  cleanup?: () => Promise<void>;
+}
+
+export interface LoadedRecipeText {
+  source: string;
+  cleanup?: () => Promise<void>;
+}
 
 const AUTH_CHOICE_TO_FIELD: Record<string, string> = {
   "openai-api-key": "openai_api_key",
@@ -218,24 +242,379 @@ function semanticValidate(recipe: Recipe): void {
   }
 }
 
-export async function loadRecipe(recipePath: string, options: RunOptions): Promise<Recipe> {
-  const absoluteRecipePath = path.resolve(recipePath);
-  const source = await readFile(absoluteRecipePath, "utf8");
-  const raw = YAML.load(source);
-  const firstParse = recipeSchema.safeParse(raw);
-  if (!firstParse.success) {
-    throw new ClawChefError(`Recipe format is invalid: ${firstParse.error.message}`);
+const DEFAULT_RECIPE_FILE = "recipe.yaml";
+const ARCHIVE_EXTENSIONS = [".tar.gz", ".tgz", ".zip", ".tar"] as const;
+
+interface ResolvedRecipeReference {
+  recipePath: string;
+  origin: RecipeOrigin;
+  cleanupPaths: string[];
+}
+
+function isHttpUrl(value: string): boolean {
+  try {
+    const url = new URL(value);
+    return url.protocol === "http:" || url.protocol === "https:";
+  } catch {
+    return false;
+  }
+}
+
+function archiveExtensionFromPath(filePath: string): string | undefined {
+  const lower = filePath.toLowerCase();
+  return ARCHIVE_EXTENSIONS.find((ext) => lower.endsWith(ext));
+}
+
+function splitLocalReference(input: string): { base: string; inner: string } | undefined {
+  const idx = input.lastIndexOf(":");
+  if (idx <= 0 || idx >= input.length - 1) {
+    return undefined;
+  }
+  return {
+    base: input.slice(0, idx),
+    inner: input.slice(idx + 1),
+  };
+}
+
+function parseUrlReference(input: string): { archiveUrl: string; inner?: string; directUrl?: string } {
+  const parsed = new URL(input);
+  const lowerPath = parsed.pathname.toLowerCase();
+
+  for (const ext of ARCHIVE_EXTENSIONS) {
+    const marker = `${ext}:`;
+    const idx = lowerPath.lastIndexOf(marker);
+    if (idx >= 0) {
+      const archivePath = parsed.pathname.slice(0, idx + ext.length);
+      const inner = parsed.pathname.slice(idx + ext.length + 1);
+      const archiveUrl = new URL(input);
+      archiveUrl.pathname = archivePath;
+      return {
+        archiveUrl: archiveUrl.toString(),
+        inner,
+      };
+    }
   }
 
-  assertNoInlineSecrets(firstParse.data);
-
-  const vars = collectVars(firstParse.data, options.vars);
-  const resolved = deepResolveTemplates(firstParse.data, vars, options.allowMissing);
-  const secondParse = recipeSchema.safeParse(resolved);
-  if (!secondParse.success) {
-    throw new ClawChefError(`Recipe is invalid after parameter resolution: ${secondParse.error.message}`);
+  const archiveExt = archiveExtensionFromPath(parsed.pathname);
+  if (archiveExt) {
+    return {
+      archiveUrl: parsed.toString(),
+    };
   }
 
-  semanticValidate(secondParse.data);
-  return secondParse.data;
+  return {
+    archiveUrl: "",
+    directUrl: parsed.toString(),
+  };
+}
+
+async function runCommand(command: string, args: string[]): Promise<void> {
+  await new Promise<void>((resolve, reject) => {
+    const child = spawn(command, args, {
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+
+    const stdoutChunks: string[] = [];
+    const stderrChunks: string[] = [];
+    child.stdout.on("data", (buf) => {
+      stdoutChunks.push(String(buf));
+    });
+    child.stderr.on("data", (buf) => {
+      stderrChunks.push(String(buf));
+    });
+
+    child.on("error", (err) => {
+      reject(new ClawChefError(`Failed to run ${command}: ${err.message}`));
+    });
+
+    child.on("close", (code) => {
+      if (code === 0) {
+        resolve();
+        return;
+      }
+      const stderr = stderrChunks.join("").trim();
+      const stdout = stdoutChunks.join("").trim();
+      const details = stderr || stdout || "unknown error";
+      reject(new ClawChefError(`Failed to run ${command}: ${details}`));
+    });
+  });
+}
+
+async function extractArchive(archivePath: string, extractDir: string): Promise<void> {
+  const lower = archivePath.toLowerCase();
+  if (lower.endsWith(".zip")) {
+    await runCommand("unzip", ["-oq", archivePath, "-d", extractDir]);
+    return;
+  }
+  if (lower.endsWith(".tar") || lower.endsWith(".tar.gz") || lower.endsWith(".tgz")) {
+    await runCommand("tar", ["-xf", archivePath, "-C", extractDir]);
+    return;
+  }
+  throw new ClawChefError(`Unsupported archive format: ${archivePath}`);
+}
+
+async function resolveRecipeReference(recipeInput: string): Promise<ResolvedRecipeReference> {
+  if (isHttpUrl(recipeInput)) {
+    const parsed = parseUrlReference(recipeInput);
+    if (parsed.directUrl) {
+      let response: Response;
+      try {
+        response = await fetch(parsed.directUrl);
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        throw new ClawChefError(`Failed to fetch recipe URL ${parsed.directUrl}: ${message}`);
+      }
+      if (!response.ok) {
+        throw new ClawChefError(`Failed to fetch recipe URL ${parsed.directUrl}: HTTP ${response.status}`);
+      }
+
+      const tempDir = await mkdtemp(path.join(tmpdir(), "clawchef-recipe-"));
+      const recipePath = path.join(tempDir, DEFAULT_RECIPE_FILE);
+      await writeFile(recipePath, await response.text(), "utf8");
+
+      return {
+        recipePath,
+        origin: {
+          kind: "url",
+          recipeUrl: parsed.directUrl,
+        },
+        cleanupPaths: [tempDir],
+      };
+    }
+
+    const archiveUrl = parsed.archiveUrl;
+    const recipeInArchive = parsed.inner?.trim() || DEFAULT_RECIPE_FILE;
+    const tempDir = await mkdtemp(path.join(tmpdir(), "clawchef-recipe-"));
+    const archiveExt = archiveExtensionFromPath(new URL(archiveUrl).pathname) ?? ".archive";
+    const downloadedArchivePath = path.join(tempDir, `archive${archiveExt}`);
+
+    let response: Response;
+    try {
+      response = await fetch(archiveUrl);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      throw new ClawChefError(`Failed to fetch recipe archive URL ${archiveUrl}: ${message}`);
+    }
+    if (!response.ok) {
+      throw new ClawChefError(`Failed to fetch recipe archive URL ${archiveUrl}: HTTP ${response.status}`);
+    }
+    const bytes = Buffer.from(await response.arrayBuffer());
+    await writeFile(downloadedArchivePath, bytes);
+
+    const extractDir = path.join(tempDir, "extracted");
+    await rm(extractDir, { recursive: true, force: true });
+    await mkdir(extractDir, { recursive: true });
+    await extractArchive(downloadedArchivePath, extractDir);
+
+    const recipePath = path.join(extractDir, recipeInArchive);
+    try {
+      const s = await stat(recipePath);
+      if (!s.isFile()) {
+        throw new ClawChefError(`Recipe in archive is not a file: ${recipeInArchive}`);
+      }
+    } catch {
+      throw new ClawChefError(`Recipe file not found in archive: ${recipeInArchive}`);
+    }
+
+    return {
+      recipePath,
+      origin: {
+        kind: "local",
+        recipePath,
+        recipeDir: path.dirname(recipePath),
+      },
+      cleanupPaths: [tempDir],
+    };
+  }
+
+  const localPath = path.resolve(recipeInput);
+  let localEntry: Awaited<ReturnType<typeof stat>> | undefined;
+  try {
+    localEntry = await stat(localPath);
+  } catch {
+    localEntry = undefined;
+  }
+
+  if (localEntry?.isDirectory()) {
+    const recipePath = path.join(localPath, DEFAULT_RECIPE_FILE);
+    return {
+      recipePath,
+      origin: {
+        kind: "local",
+        recipePath,
+        recipeDir: path.dirname(recipePath),
+      },
+      cleanupPaths: [],
+    };
+  }
+
+  if (localEntry?.isFile()) {
+    const archiveExt = archiveExtensionFromPath(localPath);
+    if (archiveExt) {
+      const tempDir = await mkdtemp(path.join(tmpdir(), "clawchef-recipe-"));
+      const extractDir = path.join(tempDir, "extracted");
+      await mkdir(extractDir, { recursive: true });
+      await extractArchive(localPath, extractDir);
+      const recipePath = path.join(extractDir, DEFAULT_RECIPE_FILE);
+      try {
+        const s = await stat(recipePath);
+        if (!s.isFile()) {
+          throw new ClawChefError(`Recipe in archive is not a file: ${DEFAULT_RECIPE_FILE}`);
+        }
+      } catch {
+        throw new ClawChefError(`Recipe file not found in archive: ${DEFAULT_RECIPE_FILE}`);
+      }
+      return {
+        recipePath,
+        origin: {
+          kind: "local",
+          recipePath,
+          recipeDir: path.dirname(recipePath),
+        },
+        cleanupPaths: [tempDir],
+      };
+    }
+
+    return {
+      recipePath: localPath,
+      origin: {
+        kind: "local",
+        recipePath: localPath,
+        recipeDir: path.dirname(localPath),
+      },
+      cleanupPaths: [],
+    };
+  }
+
+  const split = splitLocalReference(recipeInput);
+  if (!split) {
+    throw new ClawChefError(`Recipe not found: ${recipeInput}`);
+  }
+
+  const basePath = path.resolve(split.base);
+  const selector = split.inner;
+  let entry;
+  try {
+    entry = await stat(basePath);
+  } catch {
+    throw new ClawChefError(`Recipe base not found: ${split.base}`);
+  }
+
+  if (entry.isDirectory()) {
+    const recipePath = path.join(basePath, selector);
+    return {
+      recipePath,
+      origin: {
+        kind: "local",
+        recipePath,
+        recipeDir: path.dirname(recipePath),
+      },
+      cleanupPaths: [],
+    };
+  }
+
+  if (entry.isFile()) {
+    const archiveExt = archiveExtensionFromPath(basePath);
+    if (!archiveExt) {
+      throw new ClawChefError(`Recipe selector with ':' is only supported for directories or archives: ${recipeInput}`);
+    }
+
+    const tempDir = await mkdtemp(path.join(tmpdir(), "clawchef-recipe-"));
+    const extractDir = path.join(tempDir, "extracted");
+    await mkdir(extractDir, { recursive: true });
+    await extractArchive(basePath, extractDir);
+    const recipePath = path.join(extractDir, selector);
+    try {
+      const s = await stat(recipePath);
+      if (!s.isFile()) {
+        throw new ClawChefError(`Recipe in archive is not a file: ${selector}`);
+      }
+    } catch {
+      throw new ClawChefError(`Recipe file not found in archive: ${selector}`);
+    }
+    return {
+      recipePath,
+      origin: {
+        kind: "local",
+        recipePath,
+        recipeDir: path.dirname(recipePath),
+      },
+      cleanupPaths: [tempDir],
+    };
+  }
+
+  throw new ClawChefError(`Unsupported recipe reference: ${recipeInput}`);
+}
+
+async function withResolvedRecipe<T>(
+  recipeInput: string,
+  fn: (resolved: ResolvedRecipeReference) => Promise<T>,
+): Promise<{ result: T; cleanup?: () => Promise<void> }> {
+  const resolved = await resolveRecipeReference(recipeInput);
+  let shouldCleanup = true;
+  const cleanup = async (): Promise<void> => {
+    if (!shouldCleanup) {
+      return;
+    }
+    shouldCleanup = false;
+    for (const cleanupPath of resolved.cleanupPaths) {
+      await rm(cleanupPath, { recursive: true, force: true });
+    }
+  };
+
+  try {
+    const result = await fn(resolved);
+    if (resolved.cleanupPaths.length === 0) {
+      shouldCleanup = false;
+      return { result };
+    }
+    return { result, cleanup };
+  } catch (err) {
+    await cleanup();
+    throw err;
+  }
+}
+
+export async function loadRecipeText(recipeRef: string): Promise<LoadedRecipeText> {
+  const { result, cleanup } = await withResolvedRecipe(recipeRef, async (resolved) => {
+    const source = await readFile(resolved.recipePath, "utf8");
+    return { source };
+  });
+
+  return {
+    source: result.source,
+    cleanup,
+  };
+}
+
+export async function loadRecipe(recipePath: string, options: RunOptions): Promise<LoadedRecipe> {
+  const { result, cleanup } = await withResolvedRecipe(recipePath, async (recipeRef) => {
+    const source = await readFile(recipeRef.recipePath, "utf8");
+    const raw = YAML.load(source);
+    const firstParse = recipeSchema.safeParse(raw);
+    if (!firstParse.success) {
+      throw new ClawChefError(`Recipe format is invalid: ${firstParse.error.message}`);
+    }
+
+    assertNoInlineSecrets(firstParse.data);
+
+    const vars = collectVars(firstParse.data, options.vars);
+    const rendered = deepResolveTemplates(firstParse.data, vars, options.allowMissing);
+    const secondParse = recipeSchema.safeParse(rendered);
+    if (!secondParse.success) {
+      throw new ClawChefError(`Recipe is invalid after parameter resolution: ${secondParse.error.message}`);
+    }
+
+    semanticValidate(secondParse.data);
+    return {
+      recipe: secondParse.data,
+      origin: recipeRef.origin,
+    };
+  });
+
+  return {
+    recipe: result.recipe,
+    origin: result.origin,
+    cleanup,
+  };
 }

@@ -10,6 +10,7 @@ const openClawCommandsSchema = z
   .object({
     use_version: z.string().optional(),
     install_version: z.string().optional(),
+    uninstall_version: z.string().optional(),
     factory_reset: z.string().optional(),
     start_gateway: z.string().optional(),
     enable_plugin: z.string().optional(),
@@ -54,7 +55,6 @@ const openClawBootstrapSchema = z
 
 const openClawSchema = z
   .object({
-    provider: z.enum(["command", "mock"]).optional(),
     bin: z.string().optional(),
     version: z.string(),
     install: z.enum(["auto", "always", "never"]).optional(),
@@ -106,12 +106,13 @@ const fileSchema = z
     workspace: z.string().min(1),
     path: z.string().min(1),
     content: z.string().optional(),
+    content_from: z.string().min(1).optional(),
     source: z.string().optional(),
     overwrite: z.boolean().optional(),
   })
   .strict()
-  .refine((v) => Boolean(v.content) !== Boolean(v.source), {
-    message: "files[] requires exactly one of content or source",
+  .refine((v) => [v.content, v.content_from, v.source].filter((item) => item !== undefined).length === 1, {
+    message: "files[] requires exactly one of content, content_from, or source",
   });
 
 const conversationExpectSchema = z

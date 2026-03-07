@@ -1,5 +1,14 @@
 export type InstallPolicy = "auto" | "always" | "never";
-export type OpenClawProvider = "command" | "mock";
+export type OpenClawProvider = "command" | "mock" | "remote";
+
+export interface OpenClawRemoteConfig {
+  base_url: string;
+  api_key?: string;
+  api_header?: string;
+  api_scheme?: string;
+  timeout_ms?: number;
+  operation_path?: string;
+}
 
 export interface ParamDef {
   default?: string;
@@ -10,6 +19,7 @@ export interface ParamDef {
 export interface OpenClawCommandOverrides {
   use_version?: string;
   install_version?: string;
+  uninstall_version?: string;
   factory_reset?: string;
   start_gateway?: string;
   enable_plugin?: string;
@@ -50,7 +60,6 @@ export interface OpenClawBootstrap {
 }
 
 export interface OpenClawSection {
-  provider?: OpenClawProvider;
   bin?: string;
   version: string;
   install?: InstallPolicy;
@@ -94,6 +103,7 @@ export interface FileDef {
   workspace: string;
   path: string;
   content?: string;
+  content_from?: string;
   source?: string;
   overwrite?: boolean;
 }
@@ -135,4 +145,6 @@ export interface RunOptions {
   allowMissing: boolean;
   verbose: boolean;
   silent: boolean;
+  provider: OpenClawProvider;
+  remote: Partial<OpenClawRemoteConfig>;
 }

@@ -16,7 +16,6 @@ params:
     required: true
 
 openclaw:
-  provider: "command"
   bin: "openclaw"
   version: "${openclaw_version}"
   install: "never"

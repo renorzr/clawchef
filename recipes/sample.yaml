@@ -10,7 +10,6 @@ params:
     default: "mock-telegram-token"
 
 openclaw:
-  provider: "mock"
   version: "${openclaw_version}"
   install: "auto"
 
