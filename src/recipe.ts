@@ -55,6 +55,7 @@ const SECRET_BOOTSTRAP_FIELDS = [
 
 const ALLOWED_CHANNELS = new Set([
   "telegram",
+  "telegram-mock",
   "whatsapp",
   "discord",
   "googlechat",

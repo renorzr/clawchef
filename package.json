@@ -3,6 +3,18 @@
   "version": "0.1.0",
   "description": "Recipe-driven OpenClaw environment orchestrator",
   "type": "module",
+  "main": "dist/api.js",
+  "types": "dist/api.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/api.d.ts",
+      "import": "./dist/api.js"
+    },
+    "./api": {
+      "types": "./dist/api.d.ts",
+      "import": "./dist/api.js"
+    }
+  },
   "bin": {
     "clawchef": "dist/index.js"
   },

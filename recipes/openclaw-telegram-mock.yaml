@@ -1,0 +1,22 @@
+version: "1"
+name: "openclaw-telegram-mock-channel"
+
+params:
+  openclaw_version:
+    default: "2026.2.9"
+  telegram_mock_api_key:
+    required: true
+
+openclaw:
+  bin: "openclaw"
+  version: "${openclaw_version}"
+  install: "never"
+
+channels:
+  - channel: "telegram-mock"
+    account: "testbot"
+    token: "${telegram_mock_api_key}"
+    extra_flags:
+      mock_bind: "127.0.0.1:18790"
+      mock_api_key: "${telegram_mock_api_key}"
+      mode: "webhook"

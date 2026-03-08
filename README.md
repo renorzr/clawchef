@@ -88,6 +88,12 @@ Telegram channel setup only:
 CLAWCHEF_VAR_TELEGRAM_BOT_TOKEN=123456:abc... clawchef cook recipes/openclaw-telegram.yaml -s
 ```
 
+Telegram mock channel setup (for tests):
+
+```bash
+CLAWCHEF_VAR_TELEGRAM_MOCK_API_KEY=test-key clawchef cook recipes/openclaw-telegram-mock.yaml -s
+```
+
 Remote HTTP orchestration:
 
 ```bash
@@ -114,6 +120,38 @@ Validate recipe in archive:
 clawchef validate ./bundle.zip
 clawchef validate ./bundle.zip:custom/recipe.yaml
 ```
+
+## Node.js API
+
+You can call clawchef directly from Node.js (without invoking CLI commands).
+
+```ts
+import { cook, validate } from "clawchef";
+
+await validate("recipes/sample.yaml");
+
+await cook("recipes/sample.yaml", {
+  provider: "command",
+  silent: true,
+  vars: {
+    openai_api_key: process.env.OPENAI_API_KEY ?? "",
+  },
+});
+```
+
+`cook()` options:
+
+- `vars`: template variables (`Record<string, string>`)
+- `provider`: `command | remote | mock`
+- `remote`: remote provider config (same fields as CLI remote flags)
+- `dryRun`, `allowMissing`, `verbose`
+- `silent` (default: `true` in Node API)
+- `loadDotEnvFromCwd` (default: `true`)
+
+Notes:
+
+- `validate()` throws on invalid recipe.
+- `cook()` throws on runtime/configuration errors.
 
 ## Variable precedence
 
@@ -269,6 +307,35 @@ Supported common fields:
 - required: `channel`
 - optional: `account`, `name`, `token`, `token_file`, `use_env`, `bot_token`, `access_token`, `app_token`, `webhook_url`, `webhook_path`, `signal_number`, `password`, `login`, `login_mode`, `login_account`
 - advanced passthrough: `extra_flags` (`snake_case` keys become `--kebab-case` CLI flags)
+
+### Telegram mock channel (for recipe tests)
+
+Use `channel: "telegram-mock"` when you need to test Telegram-related recipe flows without connecting to the real Telegram network.
+
+`clawchef` treats `telegram-mock` like any other channel and passes mock-specific flags through `extra_flags`.
+
+Example:
+
+```yaml
+params:
+  telegram_mock_api_key:
+    required: true
+
+channels:
+  - channel: "telegram-mock"
+    account: "testbot"
+    token: "${telegram_mock_api_key}"
+    extra_flags:
+      mock_bind: "127.0.0.1:18790"
+      mock_api_key: "${telegram_mock_api_key}"
+      mode: "webhook"
+```
+
+Typical test setup:
+
+- Start OpenClaw with the telegram-mock plugin enabled.
+- Run `clawchef cook ...` to configure workspaces/agents/channels.
+- Use your external test program (HTTP API or Node.js SDK) to inject inbound mock messages and assert outbound events.
 
 Login fields:
 

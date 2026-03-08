@@ -1,21 +1,7 @@
 #!/usr/bin/env node
-import { existsSync } from "node:fs";
-import path from "node:path";
-import { config as loadDotenv } from "dotenv";
 import { buildCli } from "./cli.js";
+import { importDotEnvFromCwd } from "./env.js";
 import { ClawChefError } from "./errors.js";
-
-function importDotEnvFromCwd(): void {
-  const envPath = path.resolve(process.cwd(), ".env");
-  if (!existsSync(envPath)) {
-    return;
-  }
-
-  const result = loadDotenv({ path: envPath, override: false });
-  if (result.error) {
-    throw new ClawChefError(`Failed to load .env from current directory: ${result.error.message}`);
-  }
-}
 
 async function main(): Promise<void> {
   importDotEnvFromCwd();
