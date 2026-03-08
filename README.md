@@ -29,62 +29,63 @@ Recipe-driven OpenClaw environment orchestrator.
 ```bash
 npm install
 npm run build
-node dist/index.js cook recipes/sample.yaml
+npm i -g .
+clawchef cook recipes/sample.yaml
 ```
 
 Run recipe from URL:
 
 ```bash
-npm run dev -- cook https://example.com/recipes/sample.yaml --provider remote -s
+clawchef cook https://example.com/recipes/sample.yaml --provider remote -s
 ```
 
 Run recipe from archive (default `recipe.yaml`):
 
 ```bash
-npm run dev -- cook ./bundle.tgz --provider mock -s
+clawchef cook ./bundle.tgz --provider mock -s
 ```
 
 Run specific recipe in directory or archive:
 
 ```bash
-npm run dev -- cook ./recipes-pack:team/recipe-prod.yaml --provider remote -s
-npm run dev -- cook https://example.com/recipes-pack.zip:team/recipe-prod.yaml --provider remote -s
+clawchef cook ./recipes-pack:team/recipe-prod.yaml --provider remote -s
+clawchef cook https://example.com/recipes-pack.zip:team/recipe-prod.yaml --provider remote -s
 ```
 
 Dev mode:
 
 ```bash
-npm run dev -- cook recipes/sample.yaml --verbose
+clawchef cook recipes/sample.yaml --verbose
 ```
 
 Run sample with mock provider:
 
 ```bash
-npm run dev -- cook recipes/sample.yaml --provider mock -s
+clawchef cook recipes/sample.yaml --provider mock -s
 ```
 
 Run `content_from` sample:
 
 ```bash
-npm run dev -- cook recipes/content-from-sample.yaml --provider mock -s
+clawchef cook recipes/content-from-sample.yaml --provider mock -s
 ```
 
 Skip reset confirmation prompt:
 
 ```bash
-npm run dev -- cook recipes/sample.yaml -s
+clawchef cook recipes/sample.yaml -s
 ```
 
 From-zero OpenClaw bootstrap (recommended):
 
 ```bash
-CLAWCHEF_VAR_OPENAI_API_KEY=sk-... npm run dev -- cook recipes/openclaw-from-zero.yaml --verbose
+CLAWCHEF_VAR_OPENAI_API_KEY=sk-... clawchef cook recipes/openclaw-from-zero.yaml --verbose
 ```
 
 Telegram channel setup only:
 
 ```bash
-CLAWCHEF_VAR_TELEGRAM_BOT_TOKEN=123456:abc... npm run dev -- cook recipes/openclaw-telegram.yaml -s
+CLAWCHEF_VAR_TELEGRAM_BOT_TOKEN=123456:abc... clawchef cook recipes/openclaw-telegram.yaml -s
 ```
 
 Remote HTTP orchestration:
@@ -92,26 +93,26 @@ Remote HTTP orchestration:
 ```bash
 CLAWCHEF_REMOTE_BASE_URL=https://remote-openclaw.example.com \
 CLAWCHEF_REMOTE_API_KEY=secret-token \
-npm run dev -- cook recipes/openclaw-remote-http.yaml --provider remote -s --verbose
+clawchef cook recipes/openclaw-remote-http.yaml --provider remote -s --verbose
 ```
 
 Validate recipe structure only:
 
 ```bash
-npm run dev -- validate recipes/sample.yaml
+clawchef validate recipes/sample.yaml
 ```
 
 Validate recipe from URL:
 
 ```bash
-npm run dev -- validate https://example.com/recipes/sample.yaml
+clawchef validate https://example.com/recipes/sample.yaml
 ```
 
 Validate recipe in archive:
 
 ```bash
-npm run dev -- validate ./bundle.zip
-npm run dev -- validate ./bundle.zip:custom/recipe.yaml
+clawchef validate ./bundle.zip
+clawchef validate ./bundle.zip:custom/recipe.yaml
 ```
 
 ## Variable precedence
