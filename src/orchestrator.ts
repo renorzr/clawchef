@@ -1,6 +1,6 @@
 import path from "node:path";
 import { homedir } from "node:os";
-import { mkdir, access, copyFile, writeFile, readFile } from "node:fs/promises";
+import { mkdir, access, copyFile, writeFile, readFile, readdir, stat } from "node:fs/promises";
 import { constants } from "node:fs";
 import { createInterface } from "node:readline/promises";
 import { stdin as input, stdout as output } from "node:process";
@@ -37,7 +37,9 @@ function resolveWorkspacePath(recipeOrigin: RecipeOrigin, name: string, configur
     }
     return path.resolve(configuredPath);
   }
-  return path.join(homedir(), ".openclaw", "workspaces", name);
+  const trimmedName = name.trim() || name;
+  const workspaceName = trimmedName.startsWith("workspace-") ? trimmedName : `workspace-${trimmedName}`;
+  return path.join(homedir(), ".openclaw", workspaceName);
 }
 
 function isHttpUrl(value: string): boolean {
@@ -85,6 +87,35 @@ async function readBinaryFromRef(recipeOrigin: RecipeOrigin, reference: string):
   }
   const bytes = await response.arrayBuffer();
   return Buffer.from(bytes);
+}
+
+interface LocalAssetFile {
+  absolutePath: string;
+  relativePath: string;
+}
+
+async function collectLocalAssetFiles(rootDir: string, relDir = ""): Promise<LocalAssetFile[]> {
+  const currentDir = relDir ? path.join(rootDir, relDir) : rootDir;
+  const entries = await readdir(currentDir, { withFileTypes: true });
+  const out: LocalAssetFile[] = [];
+
+  for (const entry of entries) {
+    const nextRel = relDir ? path.join(relDir, entry.name) : entry.name;
+    if (entry.isDirectory()) {
+      out.push(...await collectLocalAssetFiles(rootDir, nextRel));
+      continue;
+    }
+    if (entry.isFile()) {
+      out.push({
+        absolutePath: path.join(rootDir, nextRel),
+        relativePath: nextRel,
+      });
+      continue;
+    }
+    throw new ClawChefError(`Unsupported entry in assets directory: ${path.join(rootDir, nextRel)}`);
+  }
+
+  return out;
 }
 
 async function confirmFactoryReset(options: RunOptions): Promise<boolean> {
@@ -146,6 +177,50 @@ export async function runRecipe(
     }
     await provider.createWorkspace(recipe.openclaw, { ...ws, path: absPath }, options.dryRun);
     logger.info(`Workspace created: ${ws.name}`);
+
+    if (!ws.assets?.trim()) {
+      continue;
+    }
+
+    const resolvedAssets = resolveFileRef(recipeOrigin, ws.assets);
+    if (resolvedAssets.kind !== "local") {
+      throw new ClawChefError(
+        `Workspace assets must resolve to a local directory: ${ws.assets}. Direct URL recipes cannot use workspaces[].assets.`,
+      );
+    }
+
+    let assetDirStat;
+    try {
+      assetDirStat = await stat(resolvedAssets.value);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      throw new ClawChefError(`Workspace assets path is not accessible: ${resolvedAssets.value} (${message})`);
+    }
+    if (!assetDirStat.isDirectory()) {
+      throw new ClawChefError(`Workspace assets must be a directory: ${resolvedAssets.value}`);
+    }
+
+    const assetFiles = await collectLocalAssetFiles(resolvedAssets.value);
+    for (const assetFile of assetFiles) {
+      if (provider.materializeFile) {
+        const content = await readFile(assetFile.absolutePath, "utf8");
+        await provider.materializeFile(
+          recipe.openclaw,
+          ws.name,
+          assetFile.relativePath,
+          content,
+          true,
+          options.dryRun,
+        );
+      } else {
+        const target = path.resolve(absPath, assetFile.relativePath);
+        if (!options.dryRun) {
+          await mkdir(path.dirname(target), { recursive: true });
+          await copyFile(assetFile.absolutePath, target);
+        }
+      }
+      logger.info(`Workspace asset copied: ${ws.name}/${assetFile.relativePath}`);
+    }
   }
 
   for (const agent of recipe.agents ?? []) {

@@ -14,7 +14,8 @@ Recipe-driven OpenClaw environment orchestrator.
 - Always runs factory reset first (with confirmation prompt unless `-s/--silent` is used).
 - If `openclaw` is missing, auto-installs the recipe version and skips factory reset.
 - Starts OpenClaw gateway service after each recipe execution.
-- Creates workspaces and agents (default workspace path: `~/.openclaw/workspaces/<workspace-name>`).
+- Creates workspaces and agents (default workspace path: `~/.openclaw/workspace-<workspace-name>`).
+- Supports workspace-level assets copy via `workspaces[].assets`.
 - Materializes files into target workspaces.
 - Installs skills.
 - Supports plugin preinstall via `openclaw.plugins[]` and runtime `--plugin` flags.
@@ -141,7 +142,7 @@ clawchef scaffold ./my-recipe-project --name meetingbot
 Scaffold output:
 
 - `package.json` with `telegram-api-mock-server` in `devDependencies`
-- `src/recipe.yaml` with `telegram-mock` channel and plugin preinstall
+- `src/recipe.yaml` with `telegram-mock` channel, plugin preinstall, and `workspaces[].assets`
 - `src/<project-name>-assets/{AGENTS.md,IDENTITY.md,SOUL.md,TOOLS.md}`
 - `src/<project-name>-assets/scripts/scheduling.mjs`
 - `test/recipe-smoke.test.mjs`
@@ -249,7 +250,7 @@ Request payload format (POST):
   "payload": {
     "workspace": {
       "name": "demo",
-      "path": "/home/runner/.openclaw/workspaces/demo"
+      "path": "/home/runner/.openclaw/workspace-demo"
     }
   }
 }
@@ -365,10 +366,23 @@ Supported common fields:
 ## Workspace path behavior
 
 - `workspaces[].path` is optional.
-- If omitted, clawchef uses `~/.openclaw/workspaces/<workspace-name>`.
+- If omitted, clawchef uses `~/.openclaw/workspace-<workspace-name>`.
+- `workspaces[].assets` is optional.
+- If `assets` is set, clawchef recursively copies files from that directory into the workspace root.
+- `assets` is resolved relative to the recipe file path (unless absolute path is given).
+- `files[]` runs after assets copy, so `files[]` can override copied asset files.
+- Direct URL recipes do not support `workspaces[].assets` (assets must resolve to a local directory).
 - If provided, relative paths are resolved from the recipe file directory.
 - For direct URL recipe files, relative workspace paths are resolved from the current working directory.
 - For directory/archive recipe references, relative workspace paths are resolved from the selected recipe file directory.
+
+Example:
+
+```yaml
+workspaces:
+  - name: "workspace-meeting"
+    assets: "./meetingbot-assets"
+```
 
 ## File content references
 

@@ -72,6 +72,7 @@ export interface OpenClawSection {
 export interface WorkspaceDef {
   name: string;
   path?: string;
+  assets?: string;
 }
 
 export interface ChannelDef {

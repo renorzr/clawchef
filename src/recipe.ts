@@ -169,6 +169,11 @@ function collectVars(recipe: Recipe, cliVars: Record<string, string>): Record<st
 
 function semanticValidate(recipe: Recipe): void {
   const ws = new Set((recipe.workspaces ?? []).map((w) => w.name));
+  for (const workspace of recipe.workspaces ?? []) {
+    if (workspace.assets !== undefined && !workspace.assets.trim()) {
+      throw new ClawChefError(`Workspace ${workspace.name} has empty assets path`);
+    }
+  }
   for (const agent of recipe.agents ?? []) {
     if (!ws.has(agent.workspace)) {
       throw new ClawChefError(`Agent ${agent.name} references missing workspace: ${agent.workspace}`);

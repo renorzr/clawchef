@@ -89,37 +89,12 @@ openclaw:
 
 workspaces:
   - name: "\${workspace_name}"
+    assets: "./${projectName}-assets"
 
 agents:
   - workspace: "\${workspace_name}"
     name: "\${agent_name}"
     model: "\${agent_model}"
-
-files:
-  - workspace: "\${workspace_name}"
-    path: "AGENTS.md"
-    overwrite: true
-    content_from: "./${projectName}-assets/AGENTS.md"
-
-  - workspace: "\${workspace_name}"
-    path: "IDENTITY.md"
-    overwrite: true
-    content_from: "./${projectName}-assets/IDENTITY.md"
-
-  - workspace: "\${workspace_name}"
-    path: "SOUL.md"
-    overwrite: true
-    content_from: "./${projectName}-assets/SOUL.md"
-
-  - workspace: "\${workspace_name}"
-    path: "TOOLS.md"
-    overwrite: true
-    content_from: "./${projectName}-assets/TOOLS.md"
-
-  - workspace: "\${workspace_name}"
-    path: "scripts/scheduling.mjs"
-    overwrite: true
-    content_from: "./${projectName}-assets/scripts/scheduling.mjs"
 
 channels:
   - channel: "telegram-mock"
