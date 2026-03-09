@@ -11,6 +11,8 @@ openclaw:
   bin: "openclaw"
   version: "${openclaw_version}"
   install: "never"
+  plugins:
+    - "openclaw-telegram-mock-channel"
 
 channels:
   - channel: "telegram-mock"

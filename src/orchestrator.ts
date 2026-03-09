@@ -131,6 +131,13 @@ export async function runRecipe(
     logger.info("Factory reset completed");
   }
 
+  const pluginSpecs = Array.from(new Set([...(recipe.openclaw.plugins ?? []), ...options.plugins].map((v) => v.trim())))
+    .filter((v) => v.length > 0);
+  for (const pluginSpec of pluginSpecs) {
+    await provider.installPlugin(recipe.openclaw, pluginSpec, options.dryRun);
+    logger.info(`Plugin preinstalled: ${pluginSpec}`);
+  }
+
   for (const ws of recipe.workspaces ?? []) {
     const absPath = resolveWorkspacePath(recipeOrigin, ws.name, ws.path);
     workspacePaths.set(ws.name, absPath);

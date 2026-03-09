@@ -52,7 +52,6 @@ channels:
   - channel: "telegram"
     token: "${telegram_bot_token}"
     account: "default"
-    login: true
 
 conversations:
   - workspace: "${project_name}"

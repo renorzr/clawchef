@@ -4,8 +4,12 @@ import { Logger } from "./logger.js";
 import { runRecipe } from "./orchestrator.js";
 import { loadRecipe, loadRecipeText } from "./recipe.js";
 import { recipeSchema } from "./schema.js";
+import { scaffoldProject } from "./scaffold.js";
 import type { RunOptions } from "./types.js";
 import YAML from "js-yaml";
+import path from "node:path";
+import { createInterface } from "node:readline/promises";
+import { stdin as input, stdout as output } from "node:process";
 
 function parseVarFlags(values: string[]): Record<string, string> {
   const out: Record<string, string> = {};
@@ -19,6 +23,10 @@ function parseVarFlags(values: string[]): Record<string, string> {
     out[k] = v;
   }
   return out;
+}
+
+function parsePluginFlags(values: string[]): string[] {
+  return Array.from(new Set(values.map((value) => value.trim()).filter((value) => value.length > 0)));
 }
 
 function readEnv(name: string): string | undefined {
@@ -48,6 +56,21 @@ function parseOptionalInt(value: string | undefined, fieldName: string): number 
   return parsed;
 }
 
+async function promptProjectName(defaultValue: string): Promise<string> {
+  if (!input.isTTY) {
+    return defaultValue;
+  }
+
+  const rl = createInterface({ input, output });
+  try {
+    const answer = await rl.question(`Project name [${defaultValue}]: `);
+    const value = answer.trim();
+    return value || defaultValue;
+  } finally {
+    rl.close();
+  }
+}
+
 export function buildCli(): Command {
   const program = new Command();
 
@@ -65,6 +88,7 @@ export function buildCli(): Command {
     .option("--verbose", "Verbose logging", false)
     .option("-s, --silent", "Skip reset confirmation prompt", false)
     .option("--provider <provider>", "Execution provider: command | remote | mock")
+    .option("--plugin <npm-spec>", "Preinstall plugin package (repeatable)", (v, p: string[]) => p.concat([v]), [])
     .option("--remote-base-url <url>", "Remote OpenClaw API base URL")
     .option("--remote-api-key <key>", "Remote OpenClaw API key")
     .option("--remote-api-header <header>", "Remote auth header name")
@@ -75,6 +99,7 @@ export function buildCli(): Command {
       const provider = parseProvider(opts.provider ?? readEnv("CLAWCHEF_PROVIDER") ?? "command");
       const options: RunOptions = {
         vars: parseVarFlags(opts.var),
+        plugins: parsePluginFlags(opts.plugin),
         dryRun: Boolean(opts.dryRun),
         allowMissing: Boolean(opts.allowMissing),
         verbose: Boolean(opts.verbose),
@@ -98,6 +123,20 @@ export function buildCli(): Command {
           await loaded.cleanup();
         }
       }
+    });
+
+  program
+    .command("scaffold")
+    .argument("[dir]", "Target directory (default: current directory)")
+    .option("--name <project-name>", "Project name (default: directory name)")
+    .action(async (dir: string | undefined, opts) => {
+      const resolvedDir = path.resolve(dir?.trim() ? dir : process.cwd());
+      const defaultName = path.basename(resolvedDir);
+      const projectName = opts.name?.trim() ? opts.name.trim() : await promptProjectName(defaultName);
+      const result = await scaffoldProject(resolvedDir, { projectName });
+      process.stdout.write(`Scaffold created at ${result.targetDir}\n`);
+      process.stdout.write(`Project name: ${result.projectName}\n`);
+      process.stdout.write("Next: run npm install\n");
     });
 
   program

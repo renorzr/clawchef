@@ -20,6 +20,7 @@ export interface OpenClawCommandOverrides {
   use_version?: string;
   install_version?: string;
   uninstall_version?: string;
+  install_plugin?: string;
   factory_reset?: string;
   start_gateway?: string;
   enable_plugin?: string;
@@ -63,6 +64,7 @@ export interface OpenClawSection {
   bin?: string;
   version: string;
   install?: InstallPolicy;
+  plugins?: string[];
   bootstrap?: OpenClawBootstrap;
   commands?: OpenClawCommandOverrides;
 }
@@ -141,6 +143,7 @@ export interface Recipe {
 
 export interface RunOptions {
   vars: Record<string, string>;
+  plugins: string[];
   dryRun: boolean;
   allowMissing: boolean;
   verbose: boolean;

@@ -198,6 +198,15 @@ function semanticValidate(recipe: Recipe): void {
       );
     }
 
+    if (
+      channel.channel === "telegram" &&
+      (channel.login || channel.login_mode !== undefined || channel.login_account !== undefined)
+    ) {
+      throw new ClawChefError(
+        "channels[] entry for telegram does not support login/login_mode/login_account. Configure token (or use_env/token_file), then start gateway.",
+      );
+    }
+
     const hasAuth =
       Boolean(channel.use_env) ||
       Boolean(channel.token?.trim()) ||

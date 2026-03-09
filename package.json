@@ -1,6 +1,6 @@
 {
   "name": "clawchef",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Recipe-driven OpenClaw environment orchestrator",
   "type": "module",
   "main": "dist/api.js",

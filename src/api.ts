@@ -4,11 +4,14 @@ import { importDotEnvFromCwd } from "./env.js";
 import { Logger } from "./logger.js";
 import { runRecipe } from "./orchestrator.js";
 import { loadRecipe, loadRecipeText } from "./recipe.js";
+import { scaffoldProject } from "./scaffold.js";
 import { recipeSchema } from "./schema.js";
 import type { OpenClawProvider, OpenClawRemoteConfig, RunOptions } from "./types.js";
+import type { ScaffoldOptions, ScaffoldResult } from "./scaffold.js";
 
 export interface CookOptions {
   vars?: Record<string, string>;
+  plugins?: string[];
   dryRun?: boolean;
   allowMissing?: boolean;
   verbose?: boolean;
@@ -19,8 +22,10 @@ export interface CookOptions {
 }
 
 function normalizeCookOptions(options: CookOptions): RunOptions {
+  const plugins = Array.from(new Set((options.plugins ?? []).map((value) => value.trim()).filter((value) => value.length > 0)));
   return {
     vars: options.vars ?? {},
+    plugins,
     dryRun: Boolean(options.dryRun),
     allowMissing: Boolean(options.allowMissing),
     verbose: Boolean(options.verbose),
@@ -62,4 +67,9 @@ export async function validate(recipeRef: string): Promise<void> {
   }
 }
 
+export async function scaffold(targetDir?: string, options: ScaffoldOptions = {}): Promise<ScaffoldResult> {
+  return scaffoldProject(targetDir, options);
+}
+
 export type { OpenClawProvider, OpenClawRemoteConfig };
+export type { ScaffoldOptions, ScaffoldResult };

@@ -13,9 +13,10 @@ const DEFAULT_COMMANDS = {
   use_version: "${bin} --version",
   install_version: "npm install -g openclaw@${version}",
   uninstall_version: "npm uninstall -g openclaw",
+  install_plugin: "${bin} plugins install ${plugin_spec_q}",
   factory_reset: "${bin} reset --scope full --yes --non-interactive",
   start_gateway: "${bin} gateway start",
-  enable_plugin: "${bin} plugins enable ${channel_q}",
+  enable_plugin: "",
   login_channel: "${bin} channels login --channel ${channel_q}${account_arg}",
   create_agent:
     "${bin} agents add ${agent} --workspace ${workspace_path} --model ${model} --non-interactive --json",
@@ -377,6 +378,25 @@ export class CommandOpenClawProvider implements OpenClawProvider {
     await runShell(resetCmd, dryRun);
   }
 
+  async installPlugin(config: OpenClawSection, pluginSpec: string, dryRun: boolean): Promise<void> {
+    const trimmed = pluginSpec.trim();
+    if (!trimmed) {
+      return;
+    }
+
+    const bin = config.bin ?? "openclaw";
+    const cmd = commandFor(config, "install_plugin", {
+      bin,
+      version: config.version,
+      plugin_spec: trimmed,
+      plugin_spec_q: shellQuote(trimmed),
+    });
+    if (!cmd.trim()) {
+      return;
+    }
+    await runShell(cmd, dryRun);
+  }
+
   async startGateway(config: OpenClawSection, dryRun: boolean): Promise<void> {
     const bin = config.bin ?? "openclaw";
     const startCmd = commandFor(config, "start_gateway", { bin, version: config.version });
@@ -405,14 +425,17 @@ export class CommandOpenClawProvider implements OpenClawProvider {
 
   async configureChannel(config: OpenClawSection, channel: ChannelDef, dryRun: boolean): Promise<void> {
     const bin = config.bin ?? "openclaw";
-    const enablePluginCmd = commandFor(config, "enable_plugin", {
-      bin,
-      version: config.version,
-      channel: channel.channel,
-      channel_q: shellQuote(channel.channel),
-    });
-    if (enablePluginCmd.trim()) {
-      await runShell(enablePluginCmd, dryRun);
+    const enablePluginTemplate = config.commands?.enable_plugin;
+    if (enablePluginTemplate?.trim()) {
+      const enablePluginCmd = fillTemplate(enablePluginTemplate, {
+        bin,
+        version: config.version,
+        channel: channel.channel,
+        channel_q: shellQuote(channel.channel),
+      });
+      if (enablePluginCmd.trim()) {
+        await runShell(enablePluginCmd, dryRun);
+      }
     }
 
     const flags: string[] = [

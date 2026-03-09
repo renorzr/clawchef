@@ -17,9 +17,9 @@ Recipe-driven OpenClaw environment orchestrator.
 - Creates workspaces and agents (default workspace path: `~/.openclaw/workspaces/<workspace-name>`).
 - Materializes files into target workspaces.
 - Installs skills.
+- Supports plugin preinstall via `openclaw.plugins[]` and runtime `--plugin` flags.
 - Configures channels with `openclaw channels add`.
-- Enables channel plugins before channel configuration.
-- Supports interactive channel login at the end of execution (`channels[].login: true`).
+- Supports interactive channel login at the end of execution (`channels[].login: true`) for channels that expose login.
 - Supports remote HTTP orchestration via runtime flags (`--provider remote`) when OpenClaw is reachable via API.
 - Writes preset conversation messages.
 - Runs agent and validates reply output.
@@ -27,9 +27,7 @@ Recipe-driven OpenClaw environment orchestrator.
 ## Install and run
 
 ```bash
-npm install
-npm run build
-npm i -g .
+npm i -g clawchef
 clawchef cook recipes/sample.yaml
 ```
 
@@ -94,6 +92,12 @@ Telegram mock channel setup (for tests):
 CLAWCHEF_VAR_TELEGRAM_MOCK_API_KEY=test-key clawchef cook recipes/openclaw-telegram-mock.yaml -s
 ```
 
+Install plugin only for this run:
+
+```bash
+clawchef cook recipes/openclaw-telegram-mock.yaml --plugin openclaw-telegram-mock-channel -s
+```
+
 Remote HTTP orchestration:
 
 ```bash
@@ -121,12 +125,32 @@ clawchef validate ./bundle.zip
 clawchef validate ./bundle.zip:custom/recipe.yaml
 ```
 
+Create a new recipe project scaffold:
+
+```bash
+clawchef scaffold
+clawchef scaffold ./my-recipe-project
+clawchef scaffold ./my-recipe-project --name meetingbot
+```
+
+`scaffold` prompts for project name (default: target directory name).
+
+Scaffold output:
+
+- `package.json` with `telegram-api-mock-server` in `devDependencies`
+- `src/recipe.yaml` with `telegram-mock` channel and plugin preinstall
+- `src/<project-name>-assets/{AGENTS.md,IDENTITY.md,SOUL.md,TOOLS.md}`
+- `src/<project-name>-assets/scripts/scheduling.mjs`
+- `test/recipe-smoke.test.mjs`
+
+By default scaffold only writes files; it does not run `npm install`.
+
 ## Node.js API
 
 You can call clawchef directly from Node.js (without invoking CLI commands).
 
 ```ts
-import { cook, validate } from "clawchef";
+import { cook, scaffold, validate } from "clawchef";
 
 await validate("recipes/sample.yaml");
 
@@ -137,11 +161,16 @@ await cook("recipes/sample.yaml", {
     openai_api_key: process.env.OPENAI_API_KEY ?? "",
   },
 });
+
+await scaffold("./my-recipe-project", {
+  projectName: "my-recipe-project",
+});
 ```
 
 `cook()` options:
 
 - `vars`: template variables (`Record<string, string>`)
+- `plugins`: plugin npm specs to preinstall for this run (`string[]`)
 - `provider`: `command | remote | mock`
 - `remote`: remote provider config (same fields as CLI remote flags)
 - `dryRun`, `allowMissing`, `verbose`
@@ -152,6 +181,7 @@ Notes:
 
 - `validate()` throws on invalid recipe.
 - `cook()` throws on runtime/configuration errors.
+- `scaffold()` creates `package.json`, `src/recipe.yaml`, `src/<project-name>-assets`, and `test/`.
 
 ## Variable precedence
 
@@ -233,6 +263,7 @@ Expected response format:
 Supported operation values sent by clawchef:
 
 - `ensure_version`, `factory_reset`, `start_gateway`
+- `install_plugin`
 - `create_workspace`, `create_agent`, `materialize_file`, `install_skill`
 - `configure_channel`, `login_channel`
 - `run_agent`
@@ -258,6 +289,20 @@ Supported fields include:
 - setup toggles: `skip_channels`, `skip_skills`, `skip_health`, `skip_ui`, `skip_daemon`, `install_daemon`
 - auth/provider: `auth_choice`, `openai_api_key`, `anthropic_api_key`, `openrouter_api_key`, `xai_api_key`, `gemini_api_key`, `ai_gateway_api_key`, `cloudflare_ai_gateway_api_key`, `token`, `token_provider`, `token_profile_id`
 
+### Plugin preinstall
+
+Use `openclaw.plugins` to preinstall plugin packages before workspace/channel setup.
+
+Example:
+
+```yaml
+openclaw:
+  version: "2026.2.9"
+  plugins:
+    - "openclaw-telegram-mock-channel"
+    - "@scope/custom-channel-plugin@1.2.3"
+```
+
 When `openclaw.bootstrap` contains provider keys, `clawchef` also injects them into runtime env for `openclaw agent --local`.
 
 For `command` provider, default command templates are:
@@ -265,9 +310,9 @@ For `command` provider, default command templates are:
 - `use_version`: `${bin} --version`
 - `install_version`: `npm install -g openclaw@${version}`
 - `uninstall_version`: `npm uninstall -g openclaw`
+- `install_plugin`: `${bin} plugins install ${plugin_spec_q}`
 - `factory_reset`: `${bin} reset --scope full --yes --non-interactive`
 - `start_gateway`: `${bin} gateway start`
-- `enable_plugin`: `${bin} plugins enable ${channel_q}`
 - `login_channel`: `${bin} channels login --channel ${channel_q}${account_arg}`
 - `create_workspace`: generated from `openclaw.bootstrap` (override with `openclaw.commands.create_workspace`)
 - `create_agent`: `${bin} agents add ${agent} --workspace ${workspace_path} --model ${model} --non-interactive --json`
@@ -277,10 +322,14 @@ For `command` provider, default command templates are:
 
 You can override any command under `openclaw.commands` in recipe.
 
+By default, clawchef does not auto-run `openclaw plugins enable <channel>` during channel configuration.
+If you need custom enable behavior, set `openclaw.commands.enable_plugin` explicitly.
+
 ## Channels
 
 Use `channels[]` to configure accounts via `openclaw channels add`.
 If `login: true` is set, clawchef runs channel login at the end of `cook` (after gateway start).
+Telegram does not support `openclaw channels login`; do not set `login` for `channel: "telegram"`.
 
 Example:
 
@@ -289,7 +338,6 @@ channels:
   - channel: "telegram"
     token: "${telegram_bot_token}"
     account: "default"
-    login: true
 
   - channel: "slack"
     bot_token: "${slack_bot_token}"
@@ -307,46 +355,6 @@ Supported common fields:
 - required: `channel`
 - optional: `account`, `name`, `token`, `token_file`, `use_env`, `bot_token`, `access_token`, `app_token`, `webhook_url`, `webhook_path`, `signal_number`, `password`, `login`, `login_mode`, `login_account`
 - advanced passthrough: `extra_flags` (`snake_case` keys become `--kebab-case` CLI flags)
-
-### Telegram mock channel (for recipe tests)
-
-Use `channel: "telegram-mock"` when you need to test Telegram-related recipe flows without connecting to the real Telegram network.
-
-`clawchef` treats `telegram-mock` like any other channel and passes mock-specific flags through `extra_flags`.
-
-Example:
-
-```yaml
-params:
-  telegram_mock_api_key:
-    required: true
-
-channels:
-  - channel: "telegram-mock"
-    account: "testbot"
-    token: "${telegram_mock_api_key}"
-    extra_flags:
-      mock_bind: "127.0.0.1:18790"
-      mock_api_key: "${telegram_mock_api_key}"
-      mode: "webhook"
-```
-
-Typical test setup:
-
-- Start OpenClaw with the telegram-mock plugin enabled.
-- Run `clawchef cook ...` to configure workspaces/agents/channels.
-- Use your external test program (HTTP API or Node.js SDK) to inject inbound mock messages and assert outbound events.
-
-Login fields:
-
-- `login: true` enables channel login step
-- `login_mode`: currently supports `interactive`
-- `login_account`: override account used for login (defaults to `account`)
-
-Security rules:
-
-- Do not inline secret values in `channels[]`.
-- Use `${var}` placeholders and inject values via `--var` / `CLAWCHEF_VAR_*`.
 
 ## Workspace path behavior
 

@@ -8,6 +8,7 @@ export interface EnsureVersionResult {
 
 export interface OpenClawProvider {
   ensureVersion(config: OpenClawSection, dryRun: boolean, silent: boolean): Promise<EnsureVersionResult>;
+  installPlugin(config: OpenClawSection, pluginSpec: string, dryRun: boolean): Promise<void>;
   factoryReset(config: OpenClawSection, dryRun: boolean): Promise<void>;
   startGateway(config: OpenClawSection, dryRun: boolean): Promise<void>;
   createWorkspace(config: OpenClawSection, workspace: ResolvedWorkspaceDef, dryRun: boolean): Promise<void>;

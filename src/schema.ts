@@ -11,6 +11,7 @@ const openClawCommandsSchema = z
     use_version: z.string().optional(),
     install_version: z.string().optional(),
     uninstall_version: z.string().optional(),
+    install_plugin: z.string().optional(),
     factory_reset: z.string().optional(),
     start_gateway: z.string().optional(),
     enable_plugin: z.string().optional(),
@@ -58,6 +59,7 @@ const openClawSchema = z
     bin: z.string().optional(),
     version: z.string(),
     install: z.enum(["auto", "always", "never"]).optional(),
+    plugins: z.array(z.string().min(1)).optional(),
     bootstrap: openClawBootstrapSchema.optional(),
     commands: openClawCommandsSchema.optional(),
   })

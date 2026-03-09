@@ -156,6 +156,17 @@ export class RemoteOpenClawProvider implements OpenClawProvider {
     };
   }
 
+  async installPlugin(config: OpenClawSection, pluginSpec: string, dryRun: boolean): Promise<void> {
+    await this.perform(
+      config,
+      "install_plugin",
+      {
+        plugin_spec: pluginSpec,
+      },
+      dryRun,
+    );
+  }
+
   async factoryReset(config: OpenClawSection, dryRun: boolean): Promise<void> {
     await this.perform(config, "factory_reset", undefined, dryRun);
   }

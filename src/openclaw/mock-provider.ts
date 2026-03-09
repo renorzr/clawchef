@@ -40,6 +40,10 @@ export class MockOpenClawProvider implements OpenClawProvider {
     return { installedThisRun };
   }
 
+  async installPlugin(_config: OpenClawSection, _pluginSpec: string, _dryRun: boolean): Promise<void> {
+    return;
+  }
+
   async factoryReset(_config: OpenClawSection, _dryRun: boolean): Promise<void> {
     this.state.workspaces.clear();
     this.state.channels.clear();
