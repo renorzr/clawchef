@@ -34,20 +34,20 @@ clawchef cook recipes/sample.yaml
 Run recipe from URL:
 
 ```bash
-clawchef cook https://example.com/recipes/sample.yaml --provider remote -s
+clawchef cook https://example.com/recipes/sample.yaml --provider remote
 ```
 
 Run recipe from archive (default `recipe.yaml`):
 
 ```bash
-clawchef cook ./bundle.tgz --provider mock -s
+clawchef cook ./bundle.tgz --provider mock
 ```
 
 Run specific recipe in directory or archive:
 
 ```bash
-clawchef cook ./recipes-pack:team/recipe-prod.yaml --provider remote -s
-clawchef cook https://example.com/recipes-pack.zip:team/recipe-prod.yaml --provider remote -s
+clawchef cook ./recipes-pack:team/recipe-prod.yaml --provider remote
+clawchef cook https://example.com/recipes-pack.zip:team/recipe-prod.yaml --provider remote
 ```
 
 Dev mode:
@@ -59,13 +59,13 @@ clawchef cook recipes/sample.yaml --verbose
 Run sample with mock provider:
 
 ```bash
-clawchef cook recipes/sample.yaml --provider mock -s
+clawchef cook recipes/sample.yaml --provider mock
 ```
 
 Run `content_from` sample:
 
 ```bash
-clawchef cook recipes/content-from-sample.yaml --provider mock -s
+clawchef cook recipes/content-from-sample.yaml --provider mock
 ```
 
 Skip reset confirmation prompt:
@@ -73,6 +73,9 @@ Skip reset confirmation prompt:
 ```bash
 clawchef cook recipes/sample.yaml -s
 ```
+
+Warning: `-s/--silent` suppresses the factory-reset confirmation and auto-chooses force reinstall on version mismatch.
+Use it only in CI/non-interactive flows where destructive reset behavior is expected.
 
 From-zero OpenClaw bootstrap (recommended):
 
@@ -83,19 +86,19 @@ CLAWCHEF_VAR_OPENAI_API_KEY=sk-... clawchef cook recipes/openclaw-from-zero.yaml
 Telegram channel setup only:
 
 ```bash
-CLAWCHEF_VAR_TELEGRAM_BOT_TOKEN=123456:abc... clawchef cook recipes/openclaw-telegram.yaml -s
+CLAWCHEF_VAR_TELEGRAM_BOT_TOKEN=123456:abc... clawchef cook recipes/openclaw-telegram.yaml
 ```
 
 Telegram mock channel setup (for tests):
 
 ```bash
-CLAWCHEF_VAR_TELEGRAM_MOCK_API_KEY=test-key clawchef cook recipes/openclaw-telegram-mock.yaml -s
+CLAWCHEF_VAR_TELEGRAM_MOCK_API_KEY=test-key clawchef cook recipes/openclaw-telegram-mock.yaml
 ```
 
 Install plugin only for this run:
 
 ```bash
-clawchef cook recipes/openclaw-telegram-mock.yaml --plugin openclaw-telegram-mock-channel -s
+clawchef cook recipes/openclaw-telegram-mock.yaml --plugin openclaw-telegram-mock-channel
 ```
 
 Remote HTTP orchestration:
@@ -103,7 +106,7 @@ Remote HTTP orchestration:
 ```bash
 CLAWCHEF_REMOTE_BASE_URL=https://remote-openclaw.example.com \
 CLAWCHEF_REMOTE_API_KEY=secret-token \
-clawchef cook recipes/openclaw-remote-http.yaml --provider remote -s --verbose
+clawchef cook recipes/openclaw-remote-http.yaml --provider remote --verbose
 ```
 
 Validate recipe structure only:
@@ -176,6 +179,9 @@ await scaffold("./my-recipe-project", {
 - `dryRun`, `allowMissing`, `verbose`
 - `silent` (default: `true` in Node API)
 - `loadDotEnvFromCwd` (default: `true`)
+
+Node API `silent: true` has the same risk as CLI `-s`: no reset confirmation and force reinstall on version mismatch.
+Set `silent: false` when you want an interactive safety prompt.
 
 Notes:
 
