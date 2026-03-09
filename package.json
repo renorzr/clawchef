@@ -2,6 +2,14 @@
   "name": "clawchef",
   "version": "0.1.1",
   "description": "Recipe-driven OpenClaw environment orchestrator",
+  "homepage": "https://renorzr.github.io/clawchef",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/renorzr/clawchef.git"
+  },
+  "bugs": {
+    "url": "https://github.com/renorzr/clawchef/issues"
+  },
   "type": "module",
   "main": "dist/api.js",
   "types": "dist/api.d.ts",
