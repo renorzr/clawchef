@@ -39,6 +39,12 @@ Run recipe from URL:
 clawchef cook https://example.com/recipes/sample.yaml --provider remote
 ```
 
+Run recipe from GitHub repository root (`recipe.yaml` at repo root):
+
+```bash
+clawchef cook https://github.com/renorzr/loom-plus-recipe
+```
+
 Run recipe from archive (default `recipe.yaml`):
 
 ```bash
@@ -219,6 +225,7 @@ If `.env` exists in the directory where `clawchef` is executed, it is loaded bef
 - `https://host/recipe.yaml`
 - `https://host/archive.zip` (loads `recipe.yaml` from archive)
 - `https://host/archive.zip:custom/recipe.yaml`
+- `https://github.com/<owner>/<repo>` (loads `recipe.yaml` from repo root)
 
 Supported archives: `.zip`, `.tar`, `.tar.gz`, `.tgz`.
 

@@ -2,7 +2,7 @@ import path from "node:path";
 import process from "node:process";
 import { tmpdir } from "node:os";
 import { spawn } from "node:child_process";
-import { readFile, mkdtemp, stat, writeFile, rm, mkdir } from "node:fs/promises";
+import { readFile, mkdtemp, stat, writeFile, rm, mkdir, readdir } from "node:fs/promises";
 import YAML from "js-yaml";
 import { recipeSchema } from "./schema.js";
 import { ClawChefError } from "./errors.js";
@@ -266,6 +266,11 @@ interface ResolvedRecipeReference {
   cleanupPaths: string[];
 }
 
+interface GitHubRepoRef {
+  owner: string;
+  repo: string;
+}
+
 function isHttpUrl(value: string): boolean {
   try {
     const url = new URL(value);
@@ -323,6 +328,149 @@ function parseUrlReference(input: string): { archiveUrl: string; inner?: string;
   };
 }
 
+function parseGitHubRepoReference(input: string): GitHubRepoRef | undefined {
+  let parsed: URL;
+  try {
+    parsed = new URL(input);
+  } catch {
+    return undefined;
+  }
+
+  if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+    return undefined;
+  }
+  if (parsed.hostname.toLowerCase() !== "github.com") {
+    return undefined;
+  }
+  if (parsed.search || parsed.hash) {
+    return undefined;
+  }
+
+  const parts = parsed.pathname.split("/").filter((part) => part.length > 0);
+  if (parts.length !== 2) {
+    return undefined;
+  }
+
+  const owner = parts[0];
+  const repo = parts[1].endsWith(".git") ? parts[1].slice(0, -4) : parts[1];
+  if (!owner || !repo) {
+    return undefined;
+  }
+
+  return { owner, repo };
+}
+
+async function resolveRecipePathFromExtracted(
+  extractDir: string,
+  recipeInArchive: string,
+  missingMessage: string,
+): Promise<string> {
+  const directPath = path.join(extractDir, recipeInArchive);
+  try {
+    const directStat = await stat(directPath);
+    if (directStat.isFile()) {
+      return directPath;
+    }
+    throw new ClawChefError(`Recipe in archive is not a file: ${recipeInArchive}`);
+  } catch (err) {
+    if (err instanceof ClawChefError) {
+      throw err;
+    }
+  }
+
+  const entries = await readdir(extractDir, { withFileTypes: true });
+  const matched: string[] = [];
+  for (const entry of entries) {
+    if (!entry.isDirectory()) {
+      continue;
+    }
+    const candidate = path.join(extractDir, entry.name, recipeInArchive);
+    try {
+      const s = await stat(candidate);
+      if (s.isFile()) {
+        matched.push(candidate);
+      }
+    } catch {
+      continue;
+    }
+  }
+
+  if (matched.length === 1) {
+    return matched[0];
+  }
+  if (matched.length > 1) {
+    throw new ClawChefError(`Multiple recipe files found in extracted archive for ${recipeInArchive}; provide explicit selector`);
+  }
+
+  throw new ClawChefError(missingMessage);
+}
+
+async function resolveGitHubRepoReference(recipeInput: string): Promise<ResolvedRecipeReference | undefined> {
+  const repoRef = parseGitHubRepoReference(recipeInput);
+  if (!repoRef) {
+    return undefined;
+  }
+
+  const repoApiUrl = `https://api.github.com/repos/${repoRef.owner}/${repoRef.repo}`;
+  const repoHeaders = {
+    Accept: "application/vnd.github+json",
+    "User-Agent": "clawchef",
+  };
+
+  let repoResponse: Response;
+  try {
+    repoResponse = await fetch(repoApiUrl, { headers: repoHeaders });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    throw new ClawChefError(`Failed to fetch GitHub repository metadata ${repoApiUrl}: ${message}`);
+  }
+  if (!repoResponse.ok) {
+    throw new ClawChefError(`Failed to fetch GitHub repository metadata ${repoApiUrl}: HTTP ${repoResponse.status}`);
+  }
+
+  const repoJson = (await repoResponse.json()) as { default_branch?: string };
+  const defaultBranch = repoJson.default_branch?.trim();
+  if (!defaultBranch) {
+    throw new ClawChefError(`GitHub repository ${repoRef.owner}/${repoRef.repo} has no default branch`);
+  }
+
+  const tarballUrl = `https://api.github.com/repos/${repoRef.owner}/${repoRef.repo}/tarball/${encodeURIComponent(defaultBranch)}`;
+  let tarballResponse: Response;
+  try {
+    tarballResponse = await fetch(tarballUrl, { headers: repoHeaders });
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    throw new ClawChefError(`Failed to download GitHub repository tarball ${tarballUrl}: ${message}`);
+  }
+  if (!tarballResponse.ok) {
+    throw new ClawChefError(`Failed to download GitHub repository tarball ${tarballUrl}: HTTP ${tarballResponse.status}`);
+  }
+
+  const tempDir = await mkdtemp(path.join(tmpdir(), "clawchef-recipe-"));
+  const archivePath = path.join(tempDir, "repo.tar.gz");
+  await writeFile(archivePath, Buffer.from(await tarballResponse.arrayBuffer()));
+
+  const extractDir = path.join(tempDir, "extracted");
+  await mkdir(extractDir, { recursive: true });
+  await extractArchive(archivePath, extractDir);
+
+  const recipePath = await resolveRecipePathFromExtracted(
+    extractDir,
+    DEFAULT_RECIPE_FILE,
+    `Recipe file not found in GitHub repository root: ${DEFAULT_RECIPE_FILE}`,
+  );
+
+  return {
+    recipePath,
+    origin: {
+      kind: "local",
+      recipePath,
+      recipeDir: path.dirname(recipePath),
+    },
+    cleanupPaths: [tempDir],
+  };
+}
+
 async function runCommand(command: string, args: string[]): Promise<void> {
   await new Promise<void>((resolve, reject) => {
     const child = spawn(command, args, {
@@ -370,6 +518,11 @@ async function extractArchive(archivePath: string, extractDir: string): Promise<
 
 async function resolveRecipeReference(recipeInput: string): Promise<ResolvedRecipeReference> {
   if (isHttpUrl(recipeInput)) {
+    const githubResolved = await resolveGitHubRepoReference(recipeInput);
+    if (githubResolved) {
+      return githubResolved;
+    }
+
     const parsed = parseUrlReference(recipeInput);
     if (parsed.directUrl) {
       let response: Response;
@@ -421,15 +574,11 @@ async function resolveRecipeReference(recipeInput: string): Promise<ResolvedReci
     await mkdir(extractDir, { recursive: true });
     await extractArchive(downloadedArchivePath, extractDir);
 
-    const recipePath = path.join(extractDir, recipeInArchive);
-    try {
-      const s = await stat(recipePath);
-      if (!s.isFile()) {
-        throw new ClawChefError(`Recipe in archive is not a file: ${recipeInArchive}`);
-      }
-    } catch {
-      throw new ClawChefError(`Recipe file not found in archive: ${recipeInArchive}`);
-    }
+    const recipePath = await resolveRecipePathFromExtracted(
+      extractDir,
+      recipeInArchive,
+      `Recipe file not found in archive: ${recipeInArchive}`,
+    );
 
     return {
       recipePath,
@@ -470,15 +619,11 @@ async function resolveRecipeReference(recipeInput: string): Promise<ResolvedReci
       const extractDir = path.join(tempDir, "extracted");
       await mkdir(extractDir, { recursive: true });
       await extractArchive(localPath, extractDir);
-      const recipePath = path.join(extractDir, DEFAULT_RECIPE_FILE);
-      try {
-        const s = await stat(recipePath);
-        if (!s.isFile()) {
-          throw new ClawChefError(`Recipe in archive is not a file: ${DEFAULT_RECIPE_FILE}`);
-        }
-      } catch {
-        throw new ClawChefError(`Recipe file not found in archive: ${DEFAULT_RECIPE_FILE}`);
-      }
+      const recipePath = await resolveRecipePathFromExtracted(
+        extractDir,
+        DEFAULT_RECIPE_FILE,
+        `Recipe file not found in archive: ${DEFAULT_RECIPE_FILE}`,
+      );
       return {
         recipePath,
         origin: {
@@ -538,15 +683,11 @@ async function resolveRecipeReference(recipeInput: string): Promise<ResolvedReci
     const extractDir = path.join(tempDir, "extracted");
     await mkdir(extractDir, { recursive: true });
     await extractArchive(basePath, extractDir);
-    const recipePath = path.join(extractDir, selector);
-    try {
-      const s = await stat(recipePath);
-      if (!s.isFile()) {
-        throw new ClawChefError(`Recipe in archive is not a file: ${selector}`);
-      }
-    } catch {
-      throw new ClawChefError(`Recipe file not found in archive: ${selector}`);
-    }
+    const recipePath = await resolveRecipePathFromExtracted(
+      extractDir,
+      selector,
+      `Recipe file not found in archive: ${selector}`,
+    );
     return {
       recipePath,
       origin: {
