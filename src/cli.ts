@@ -78,7 +78,7 @@ export function buildCli(): Command {
   program
     .name("clawchef")
     .description("Run OpenClaw environment recipes")
-    .version("0.1.0");
+    .version("0.1.6");
 
   program
     .command("cook")
@@ -89,7 +89,7 @@ export function buildCli(): Command {
     .option("--verbose", "Verbose logging", false)
     .option("-s, --silent", "Skip reset confirmation prompt", false)
     .option("--keep-openclaw-state", "Preserve existing OpenClaw state (skip factory reset)", false)
-    .option("--env-file <path-or-url>", "Load env vars from local file or HTTP URL")
+    .option("--dotenv-ref <path-or-url>", "Load env vars from local file or HTTP URL")
     .option("--provider <provider>", "Execution provider: command | remote | mock")
     .option("--plugin <npm-spec>", "Preinstall plugin package (repeatable)", (v, p: string[]) => p.concat([v]), [])
     .option("--remote-base-url <url>", "Remote OpenClaw API base URL")
@@ -99,8 +99,8 @@ export function buildCli(): Command {
     .option("--remote-timeout-ms <ms>", "Remote operation timeout in milliseconds")
     .option("--remote-operation-path <path>", "Remote operation endpoint path")
     .action(async (recipeRef: string, opts) => {
-      if (opts.envFile) {
-        await importDotEnvFromRef(String(opts.envFile));
+      if (opts.dotenvRef) {
+        await importDotEnvFromRef(String(opts.dotenvRef));
       } else {
         importDotEnvFromCwd();
       }

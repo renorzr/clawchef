@@ -36,7 +36,7 @@ function applyEnv(entries: Record<string, string>): void {
 export async function importDotEnvFromRef(ref: string): Promise<void> {
   const trimmed = ref.trim();
   if (!trimmed) {
-    throw new ClawChefError("--env-file cannot be empty");
+    throw new ClawChefError("dotenv ref cannot be empty");
   }
 
   if (isHttpUrl(trimmed)) {

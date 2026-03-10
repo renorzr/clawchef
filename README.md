@@ -8,7 +8,7 @@ Recipe-driven OpenClaw environment orchestrator.
 - Accepts recipe input from local file/dir/archive and HTTP URL/archive.
 - Resolves `${var}` parameters from `--var`, environment, and defaults.
 - Auto-loads environment variables from `.env` in the current working directory.
-- Supports loading env vars from a custom `.env` path/URL via `--env-file`.
+- Supports loading env vars from a custom `.env` path/URL via `--dotenv-ref`.
 - Requires secrets to be injected via `--var` / `CLAWCHEF_VAR_*` (no inline secrets in recipe).
 - Prepares OpenClaw version (install or reuse).
 - When installed OpenClaw version mismatches recipe version, prompts: ignore / abort / force reinstall (silent mode auto-picks force reinstall).
@@ -43,8 +43,8 @@ clawchef cook https://example.com/recipes/sample.yaml --provider remote
 Run with custom env file (local path or HTTP URL):
 
 ```bash
-clawchef cook recipes/sample.yaml --env-file ./.env.staging
-clawchef cook recipes/sample.yaml --env-file https://example.com/envs/staging.env
+clawchef cook recipes/sample.yaml --dotenv-ref ./.env.staging
+clawchef cook recipes/sample.yaml --dotenv-ref https://example.com/envs/staging.env
 ```
 
 Run recipe from GitHub repository root (`recipe.yaml` at repo root):
@@ -221,7 +221,7 @@ Notes:
 If `params.<key>.required: true` and no value is found, run fails.
 
 If `.env` exists in the directory where `clawchef` is executed, it is loaded before recipe parsing.
-If `--env-file` (or Node API `envFile`) is provided, only that env source is loaded.
+If `--dotenv-ref` (or Node API `envFile`) is provided, only that env source is loaded.
 
 ## Recipe reference formats
 
