@@ -1,10 +1,8 @@
 #!/usr/bin/env node
 import { buildCli } from "./cli.js";
-import { importDotEnvFromCwd } from "./env.js";
 import { ClawChefError } from "./errors.js";
 
 async function main(): Promise<void> {
-  importDotEnvFromCwd();
   const program = buildCli();
   await program.parseAsync(process.argv);
 }

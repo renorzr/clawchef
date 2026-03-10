@@ -1,6 +1,6 @@
 import YAML from "js-yaml";
 import { ClawChefError } from "./errors.js";
-import { importDotEnvFromCwd } from "./env.js";
+import { importDotEnvFromCwd, importDotEnvFromRef } from "./env.js";
 import { Logger } from "./logger.js";
 import { runRecipe } from "./orchestrator.js";
 import { loadRecipe, loadRecipeText } from "./recipe.js";
@@ -18,6 +18,7 @@ export interface CookOptions {
   silent?: boolean;
   provider?: OpenClawProvider;
   remote?: Partial<OpenClawRemoteConfig>;
+  envFile?: string;
   loadDotEnvFromCwd?: boolean;
 }
 
@@ -37,7 +38,9 @@ function normalizeCookOptions(options: CookOptions): RunOptions {
 }
 
 export async function cook(recipeRef: string, options: CookOptions = {}): Promise<void> {
-  if (options.loadDotEnvFromCwd ?? true) {
+  if (options.envFile) {
+    await importDotEnvFromRef(options.envFile);
+  } else if (options.loadDotEnvFromCwd ?? true) {
     importDotEnvFromCwd();
   }
 
