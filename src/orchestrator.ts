@@ -148,11 +148,18 @@ export async function runRecipe(
   const workspacePaths = new Map<string, string>();
 
   logger.info(`Running recipe: ${recipe.name}`);
-  const versionResult = await provider.ensureVersion(recipe.openclaw, options.dryRun, options.silent);
+  const versionResult = await provider.ensureVersion(
+    recipe.openclaw,
+    options.dryRun,
+    options.silent,
+    options.keepOpenClawState,
+  );
   logger.info(`OpenClaw version ready: ${recipe.openclaw.version}`);
 
   if (versionResult.installedThisRun) {
     logger.info("OpenClaw was installed in this run; skipping factory reset");
+  } else if (options.keepOpenClawState) {
+    logger.info("Keeping existing OpenClaw state; skipping factory reset");
   } else {
     const confirmed = await confirmFactoryReset(options);
     if (!confirmed) {

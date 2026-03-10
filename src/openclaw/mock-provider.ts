@@ -21,7 +21,12 @@ export class MockOpenClawProvider implements OpenClawProvider {
     messages: new Map(),
   };
 
-  async ensureVersion(config: OpenClawSection, _dryRun: boolean, _silent: boolean): Promise<EnsureVersionResult> {
+  async ensureVersion(
+    config: OpenClawSection,
+    _dryRun: boolean,
+    _silent: boolean,
+    _keepOpenClawState: boolean,
+  ): Promise<EnsureVersionResult> {
     const policy = config.install ?? "auto";
     const installed = this.state.installedVersions.has(config.version);
     let installedThisRun = false;

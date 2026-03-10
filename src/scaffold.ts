@@ -89,7 +89,7 @@ openclaw:
 
 workspaces:
   - name: "\${workspace_name}"
-    assets: "./${projectName}-assets"
+    assets: "./assets"
 
 agents:
   - workspace: "\${workspace_name}"
@@ -153,11 +153,17 @@ console.log("[scheduling] " + message);
 function makeRecipeSmokeTest(): string {
   return `import test from "node:test";
 import assert from "node:assert/strict";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 import { access } from "node:fs/promises";
 
+const testDir = path.dirname(fileURLToPath(import.meta.url));
+const projectRoot = path.resolve(testDir, "..");
+
 test("recipe scaffold files exist", async () => {
-  await access("src/recipe.yaml");
-  await access("package.json");
+  await access(path.join(projectRoot, "recipe.yaml"));
+  await access(path.join(projectRoot, "assets", "AGENTS.md"));
+  await access(path.join(projectRoot, "package.json"));
   assert.ok(true);
 });
 `;
@@ -171,18 +177,16 @@ export async function scaffoldProject(targetDirArg?: string, options: ScaffoldOp
   const rawProjectName = options.projectName?.trim() || defaultName;
   const projectName = normalizeProjectName(rawProjectName);
 
-  const srcDir = path.join(targetDir, "src");
-  const assetsDir = path.join(srcDir, `${projectName}-assets`);
+  const assetsDir = path.join(targetDir, "assets");
   const assetsScriptsDir = path.join(assetsDir, "scripts");
   const testDir = path.join(targetDir, "test");
 
-  await mkdir(srcDir, { recursive: true });
   await mkdir(assetsDir, { recursive: true });
   await mkdir(assetsScriptsDir, { recursive: true });
   await mkdir(testDir, { recursive: true });
 
   await writeFile(path.join(targetDir, "package.json"), makePackageJson(projectName), "utf8");
-  await writeFile(path.join(srcDir, "recipe.yaml"), makeRecipeYaml(projectName), "utf8");
+  await writeFile(path.join(targetDir, "recipe.yaml"), makeRecipeYaml(projectName), "utf8");
   await writeFile(path.join(assetsDir, "AGENTS.md"), makeAgentsDoc(projectName), "utf8");
   await writeFile(path.join(assetsDir, "IDENTITY.md"), makeIdentityDoc(projectName), "utf8");
   await writeFile(path.join(assetsDir, "SOUL.md"), makeSoulDoc(), "utf8");

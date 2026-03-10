@@ -19,6 +19,7 @@ Recipe-driven OpenClaw environment orchestrator.
 - Materializes files into target workspaces.
 - Installs skills.
 - Supports plugin preinstall via `openclaw.plugins[]` and runtime `--plugin` flags.
+- Supports preserving existing OpenClaw state via `--keep-openclaw-state` (skip factory reset).
 - Configures channels with `openclaw channels add`.
 - Supports interactive channel login at the end of execution (`channels[].login: true`) for channels that expose login.
 - Supports remote HTTP orchestration via runtime flags (`--provider remote`) when OpenClaw is reachable via API.
@@ -77,6 +78,12 @@ clawchef cook recipes/sample.yaml -s
 
 Warning: `-s/--silent` suppresses the factory-reset confirmation and auto-chooses force reinstall on version mismatch.
 Use it only in CI/non-interactive flows where destructive reset behavior is expected.
+
+Keep existing OpenClaw state (skip reset and keep current version on mismatch):
+
+```bash
+clawchef cook recipes/sample.yaml --keep-openclaw-state
+```
 
 From-zero OpenClaw bootstrap (recommended):
 
@@ -142,9 +149,9 @@ clawchef scaffold ./my-recipe-project --name meetingbot
 Scaffold output:
 
 - `package.json` with `telegram-api-mock-server` in `devDependencies`
-- `src/recipe.yaml` with `telegram-mock` channel, plugin preinstall, and `workspaces[].assets`
-- `src/<project-name>-assets/{AGENTS.md,IDENTITY.md,SOUL.md,TOOLS.md}`
-- `src/<project-name>-assets/scripts/scheduling.mjs`
+- `recipe.yaml` with `telegram-mock` channel, plugin preinstall, and `workspaces[].assets`
+- `assets/{AGENTS.md,IDENTITY.md,SOUL.md,TOOLS.md}`
+- `assets/scripts/scheduling.mjs`
 - `test/recipe-smoke.test.mjs`
 
 By default scaffold only writes files; it does not run `npm install`.
@@ -188,7 +195,7 @@ Notes:
 
 - `validate()` throws on invalid recipe.
 - `cook()` throws on runtime/configuration errors.
-- `scaffold()` creates `package.json`, `src/recipe.yaml`, `src/<project-name>-assets`, and `test/`.
+- `scaffold()` creates `package.json`, `recipe.yaml`, `assets/`, and `test/`.
 
 ## Variable precedence
 

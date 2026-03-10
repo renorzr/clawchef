@@ -149,6 +149,7 @@ export interface RunOptions {
   allowMissing: boolean;
   verbose: boolean;
   silent: boolean;
+  keepOpenClawState: boolean;
   provider: OpenClawProvider;
   remote: Partial<OpenClawRemoteConfig>;
 }

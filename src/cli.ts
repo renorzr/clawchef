@@ -87,6 +87,7 @@ export function buildCli(): Command {
     .option("--allow-missing", "Allow unresolved template variables", false)
     .option("--verbose", "Verbose logging", false)
     .option("-s, --silent", "Skip reset confirmation prompt", false)
+    .option("--keep-openclaw-state", "Preserve existing OpenClaw state (skip factory reset)", false)
     .option("--provider <provider>", "Execution provider: command | remote | mock")
     .option("--plugin <npm-spec>", "Preinstall plugin package (repeatable)", (v, p: string[]) => p.concat([v]), [])
     .option("--remote-base-url <url>", "Remote OpenClaw API base URL")
@@ -104,6 +105,7 @@ export function buildCli(): Command {
         allowMissing: Boolean(opts.allowMissing),
         verbose: Boolean(opts.verbose),
         silent: Boolean(opts.silent),
+        keepOpenClawState: Boolean(opts.keepOpenclawState),
         provider,
         remote: {
           base_url: opts.remoteBaseUrl ?? readEnv("CLAWCHEF_REMOTE_BASE_URL"),

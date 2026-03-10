@@ -30,6 +30,7 @@ function normalizeCookOptions(options: CookOptions): RunOptions {
     allowMissing: Boolean(options.allowMissing),
     verbose: Boolean(options.verbose),
     silent: options.silent ?? true,
+    keepOpenClawState: false,
     provider: options.provider ?? "command",
     remote: options.remote ?? {},
   };

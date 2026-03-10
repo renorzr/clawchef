@@ -273,7 +273,12 @@ function bootstrapRuntimeEnv(bootstrap: OpenClawBootstrap | undefined): Record<s
 export class CommandOpenClawProvider implements OpenClawProvider {
   private readonly stagedMessages = new Map<string, StagedMessage[]>();
 
-  async ensureVersion(config: OpenClawSection, dryRun: boolean, silent: boolean): Promise<EnsureVersionResult> {
+  async ensureVersion(
+    config: OpenClawSection,
+    dryRun: boolean,
+    silent: boolean,
+    keepOpenClawState: boolean,
+  ): Promise<EnsureVersionResult> {
     const bin = config.bin ?? "openclaw";
     const installPolicy = config.install ?? "auto";
     const useCmd = commandFor(config, "use_version", { bin, version: config.version });
@@ -336,6 +341,10 @@ export class CommandOpenClawProvider implements OpenClawProvider {
       throw new ClawChefError(
         `OpenClaw version mismatch after install: current ${currentVersion}, expected ${config.version}`,
       );
+    }
+
+    if (keepOpenClawState) {
+      return { installedThisRun: false };
     }
 
     const choice = await chooseVersionMismatchAction(currentVersion, config.version, silent);

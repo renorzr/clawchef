@@ -141,7 +141,12 @@ export class RemoteOpenClawProvider implements OpenClawProvider {
     }
   }
 
-  async ensureVersion(config: OpenClawSection, dryRun: boolean, _silent: boolean): Promise<EnsureVersionResult> {
+  async ensureVersion(
+    config: OpenClawSection,
+    dryRun: boolean,
+    _silent: boolean,
+    _keepOpenClawState: boolean,
+  ): Promise<EnsureVersionResult> {
     const result = await this.perform(
       config,
       "ensure_version",
