@@ -15,6 +15,7 @@ const openClawCommandsSchema = z
     factory_reset: z.string().optional(),
     start_gateway: z.string().optional(),
     enable_plugin: z.string().optional(),
+    bind_channel_agent: z.string().optional(),
     login_channel: z.string().optional(),
     create_workspace: z.string().optional(),
     create_agent: z.string().optional(),
@@ -87,6 +88,7 @@ const channelSchema = z
   .object({
     channel: z.string().min(1),
     account: z.string().min(1).optional(),
+    agent: z.string().min(1).optional(),
     login: z.boolean().optional(),
     login_mode: z.enum(["interactive"]).optional(),
     login_account: z.string().min(1).optional(),

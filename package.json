@@ -1,6 +1,6 @@
 {
   "name": "clawchef",
-  "version": "0.1.7",
+  "version": "0.1.8",
   "description": "Recipe-driven OpenClaw environment orchestrator",
   "homepage": "https://renorzr.github.io/clawchef",
   "repository": {

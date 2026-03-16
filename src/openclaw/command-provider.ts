@@ -17,6 +17,7 @@ const DEFAULT_COMMANDS = {
   factory_reset: "${bin} reset --scope full --yes --non-interactive",
   start_gateway: "${bin} gateway start",
   enable_plugin: "",
+  bind_channel_agent: "",
   login_channel: "${bin} channels login --channel ${channel_q}${account_arg}",
   create_agent:
     "${bin} agents add ${agent} --workspace ${workspace_path} --model ${model} --non-interactive --json",
@@ -29,6 +30,20 @@ type CommandKey = keyof typeof DEFAULT_COMMANDS;
 
 interface StagedMessage {
   content: string;
+}
+
+interface BindingItem {
+  agentId?: unknown;
+  match?: {
+    channel?: unknown;
+    accountId?: unknown;
+    peer?: unknown;
+    parentPeer?: unknown;
+    guildId?: unknown;
+    teamId?: unknown;
+    roles?: unknown;
+  };
+  [key: string]: unknown;
 }
 
 const SECRET_FLAG_RE =
@@ -280,6 +295,39 @@ function bootstrapRuntimeEnv(bootstrap: OpenClawBootstrap | undefined): Record<s
   return env;
 }
 
+function isAccountLevelBinding(item: BindingItem, channel: string, account: string): boolean {
+  const match = item.match;
+  if (!match || typeof match !== "object") {
+    return false;
+  }
+  if (match.channel !== channel || match.accountId !== account) {
+    return false;
+  }
+  return (
+    match.peer === undefined
+    && match.parentPeer === undefined
+    && match.guildId === undefined
+    && match.teamId === undefined
+    && match.roles === undefined
+  );
+}
+
+function parseBindingsJson(raw: string): BindingItem[] {
+  if (!raw.trim()) {
+    return [];
+  }
+  try {
+    const parsed = JSON.parse(raw) as unknown;
+    if (!Array.isArray(parsed)) {
+      throw new ClawChefError("openclaw config bindings is not an array");
+    }
+    return parsed as BindingItem[];
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    throw new ClawChefError(`Failed to parse openclaw bindings JSON: ${message}`);
+  }
+}
+
 export class CommandOpenClawProvider implements OpenClawProvider {
   private readonly stagedMessages = new Map<string, StagedMessage[]>();
 
@@ -500,6 +548,58 @@ export class CommandOpenClawProvider implements OpenClawProvider {
 
     const cmd = `${bin} channels add ${flags.join(" ")}`;
     await runShell(cmd, dryRun);
+  }
+
+  async bindChannelAgent(config: OpenClawSection, channel: ChannelDef, agent: string, dryRun: boolean): Promise<void> {
+    const account = channel.account?.trim();
+    if (!account) {
+      throw new ClawChefError(`Channel ${channel.channel} requires account for agent binding`);
+    }
+
+    const bin = config.bin ?? "openclaw";
+    const customTemplate = config.commands?.bind_channel_agent;
+    if (customTemplate?.trim()) {
+      const customCmd = fillTemplate(customTemplate, {
+        bin,
+        version: config.version,
+        channel: channel.channel,
+        channel_q: shellQuote(channel.channel),
+        account,
+        account_q: shellQuote(account),
+        agent,
+        agent_q: shellQuote(agent),
+      });
+      if (customCmd.trim()) {
+        await runShell(customCmd, dryRun);
+      }
+      return;
+    }
+
+    if (dryRun) {
+      return;
+    }
+
+    const getCmd = `${bin} config get bindings --json 2>/dev/null || printf '[]'`;
+    const rawBindings = await runShell(getCmd, false);
+    const bindings = parseBindingsJson(rawBindings);
+    const nextBinding: BindingItem = {
+      agentId: agent,
+      match: {
+        channel: channel.channel,
+        accountId: account,
+      },
+    };
+
+    const index = bindings.findIndex((item) => isAccountLevelBinding(item, channel.channel, account));
+    if (index >= 0) {
+      bindings[index] = nextBinding;
+    } else {
+      bindings.push(nextBinding);
+    }
+
+    const json = JSON.stringify(bindings);
+    const setCmd = `${bin} config set bindings ${shellQuote(json)} --json`;
+    await runShell(setCmd, false);
   }
 
   async loginChannel(config: OpenClawSection, channel: ChannelDef, dryRun: boolean): Promise<void> {

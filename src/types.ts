@@ -25,6 +25,7 @@ export interface OpenClawCommandOverrides {
   factory_reset?: string;
   start_gateway?: string;
   enable_plugin?: string;
+  bind_channel_agent?: string;
   login_channel?: string;
   create_workspace?: string;
   create_agent?: string;
@@ -74,6 +75,7 @@ export interface WorkspaceDef {
 export interface ChannelDef {
   channel: string;
   account?: string;
+  agent?: string;
   login?: boolean;
   login_mode?: "interactive";
   login_account?: string;

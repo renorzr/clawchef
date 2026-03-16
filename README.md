@@ -304,7 +304,7 @@ Supported operation values sent by clawchef:
 - `ensure_version`, `factory_reset`, `start_gateway`
 - `install_plugin`
 - `create_workspace`, `create_agent`, `materialize_file`, `install_skill`
-- `configure_channel`, `login_channel`
+- `configure_channel`, `bind_channel_agent`, `login_channel`
 - `run_agent`
 
 For `run_agent`, clawchef expects `output` in response for assertions.
@@ -352,6 +352,7 @@ For `command` provider, default command templates are:
 - `install_plugin`: `${bin} plugins install ${plugin_spec_q}`
 - `factory_reset`: `${bin} reset --scope full --yes --non-interactive`
 - `start_gateway`: `${bin} gateway start`
+- `bind_channel_agent`: built-in `openclaw config get/set bindings` upsert (override with `openclaw.commands.bind_channel_agent`)
 - `login_channel`: `${bin} channels login --channel ${channel_q}${account_arg}`
 - `create_workspace`: generated from `openclaw.bootstrap` (override with `openclaw.commands.create_workspace`)
 - `create_agent`: `${bin} agents add ${agent} --workspace ${workspace_path} --model ${model} --non-interactive --json`
@@ -377,6 +378,12 @@ channels:
   - channel: "telegram"
     token: "${telegram_bot_token}"
     account: "default"
+    agent: "main"
+
+  - channel: "telegram"
+    token: "${alerts_bot_token}"
+    account: "alerts"
+    agent: "alerts"
 
   - channel: "slack"
     bot_token: "${slack_bot_token}"
@@ -392,8 +399,11 @@ channels:
 Supported common fields:
 
 - required: `channel`
-- optional: `account`, `name`, `token`, `token_file`, `use_env`, `bot_token`, `access_token`, `app_token`, `webhook_url`, `webhook_path`, `signal_number`, `password`, `login`, `login_mode`, `login_account`
+- optional: `account`, `agent`, `name`, `token`, `token_file`, `use_env`, `bot_token`, `access_token`, `app_token`, `webhook_url`, `webhook_path`, `signal_number`, `password`, `login`, `login_mode`, `login_account`
 - advanced passthrough: `extra_flags` (`snake_case` keys become `--kebab-case` CLI flags)
+
+`channels[].agent` currently supports `channel: "telegram"` only.
+If `agent` is set and `account` is omitted, clawchef defaults `account` to the same value as `agent`.
 
 ## Workspace path behavior
 

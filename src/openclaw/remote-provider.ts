@@ -188,6 +188,19 @@ export class RemoteOpenClawProvider implements OpenClawProvider {
     await this.perform(config, "configure_channel", { channel }, dryRun);
   }
 
+  async bindChannelAgent(config: OpenClawSection, channel: ChannelDef, agent: string, dryRun: boolean): Promise<void> {
+    await this.perform(
+      config,
+      "bind_channel_agent",
+      {
+        channel: channel.channel,
+        account: channel.account,
+        agent,
+      },
+      dryRun,
+    );
+  }
+
   async loginChannel(config: OpenClawSection, channel: ChannelDef, dryRun: boolean): Promise<void> {
     await this.perform(config, "login_channel", { channel }, dryRun);
   }

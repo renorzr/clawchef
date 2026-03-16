@@ -193,12 +193,14 @@ function filterRecipeByWorkspaceName(recipe: Recipe, workspaceName: string): Rec
 
 function semanticValidate(recipe: Recipe): void {
   const ws = new Set((recipe.workspaces ?? []).map((w) => w.name));
+  const agentNameCounts = new Map<string, number>();
   for (const workspace of recipe.workspaces ?? []) {
     if (workspace.assets !== undefined && !workspace.assets.trim()) {
       throw new ClawChefError(`Workspace ${workspace.name} has empty assets path`);
     }
   }
   for (const agent of recipe.agents ?? []) {
+    agentNameCounts.set(agent.name, (agentNameCounts.get(agent.name) ?? 0) + 1);
     if (!ws.has(agent.workspace)) {
       throw new ClawChefError(`Agent ${agent.name} references missing workspace: ${agent.workspace}`);
     }
@@ -236,6 +238,23 @@ function semanticValidate(recipe: Recipe): void {
       throw new ClawChefError(
         "channels[] entry for telegram does not support login/login_mode/login_account. Configure token (or use_env/token_file), then start gateway.",
       );
+    }
+
+    if (channel.agent?.trim()) {
+      if (channel.channel !== "telegram") {
+        throw new ClawChefError(
+          `channels[] entry for ${channel.channel} does not support agent binding. Use channel: telegram with agent.`,
+        );
+      }
+      const matched = agentNameCounts.get(channel.agent) ?? 0;
+      if (matched === 0) {
+        throw new ClawChefError(`channels[] entry references missing agent by name: ${channel.agent}`);
+      }
+      if (matched > 1) {
+        throw new ClawChefError(
+          `channels[] entry references duplicate agent name: ${channel.agent}. Agent names must be unique for channel binding.`,
+        );
+      }
     }
 
     const hasAuth =

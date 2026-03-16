@@ -261,8 +261,18 @@ export async function runRecipe(
   }
 
   for (const channel of recipe.channels ?? []) {
-    await provider.configureChannel(recipe.openclaw, channel, options.dryRun);
-    logger.info(`Channel configured: ${channel.channel}${channel.account ? `/${channel.account}` : ""}`);
+    const effectiveChannel = channel.agent?.trim() && !channel.account?.trim()
+      ? { ...channel, account: channel.agent.trim() }
+      : channel;
+
+    await provider.configureChannel(recipe.openclaw, effectiveChannel, options.dryRun);
+    logger.info(`Channel configured: ${effectiveChannel.channel}${effectiveChannel.account ? `/${effectiveChannel.account}` : ""}`);
+    if (effectiveChannel.agent?.trim()) {
+      await provider.bindChannelAgent(recipe.openclaw, effectiveChannel, effectiveChannel.agent, options.dryRun);
+      logger.info(
+        `Channel bound to agent: ${effectiveChannel.channel}${effectiveChannel.account ? `/${effectiveChannel.account}` : ""} -> ${effectiveChannel.agent}`,
+      );
+    }
   }
 
   for (const workspace of recipe.workspaces ?? []) {
@@ -369,16 +379,19 @@ export async function runRecipe(
   logger.info("Gateway started");
 
   for (const channel of recipe.channels ?? []) {
-    if (!channel.login) {
+    const effectiveChannel = channel.agent?.trim() && !channel.account?.trim()
+      ? { ...channel, account: channel.agent.trim() }
+      : channel;
+    if (!effectiveChannel.login) {
       continue;
     }
     if (!options.dryRun && !input.isTTY) {
       throw new ClawChefError(
-        `Channel login for ${channel.channel} requires an interactive terminal session`,
+        `Channel login for ${effectiveChannel.channel} requires an interactive terminal session`,
       );
     }
-    await provider.loginChannel(recipe.openclaw, channel, options.dryRun);
-    logger.info(`Channel login completed: ${channel.channel}${channel.account ? `/${channel.account}` : ""}`);
+    await provider.loginChannel(recipe.openclaw, effectiveChannel, options.dryRun);
+    logger.info(`Channel login completed: ${effectiveChannel.channel}${effectiveChannel.account ? `/${effectiveChannel.account}` : ""}`);
   }
 
   logger.info("Recipe execution completed");
