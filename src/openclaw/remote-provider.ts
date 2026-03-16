@@ -145,7 +145,7 @@ export class RemoteOpenClawProvider implements OpenClawProvider {
     config: OpenClawSection,
     dryRun: boolean,
     _silent: boolean,
-    _keepOpenClawState: boolean,
+    _preserveExistingState: boolean,
   ): Promise<EnsureVersionResult> {
     const result = await this.perform(
       config,

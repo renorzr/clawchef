@@ -1,5 +1,6 @@
 export type InstallPolicy = "auto" | "always" | "never";
 export type OpenClawProvider = "command" | "mock" | "remote";
+export type RunScope = "full" | "files" | "workspace";
 
 export interface OpenClawRemoteConfig {
   base_url: string;
@@ -46,13 +47,7 @@ export interface OpenClawBootstrap {
   skip_ui?: boolean;
   skip_daemon?: boolean;
   install_daemon?: boolean;
-  openai_api_key?: string;
-  anthropic_api_key?: string;
-  openrouter_api_key?: string;
-  xai_api_key?: string;
-  gemini_api_key?: string;
-  ai_gateway_api_key?: string;
-  cloudflare_ai_gateway_api_key?: string;
+  llm_api_key?: string;
   cloudflare_ai_gateway_account_id?: string;
   cloudflare_ai_gateway_gateway_id?: string;
   token?: string;
@@ -73,6 +68,7 @@ export interface WorkspaceDef {
   name: string;
   path?: string;
   assets?: string;
+  files?: WorkspaceFileDef[];
 }
 
 export interface ChannelDef {
@@ -102,8 +98,7 @@ export interface AgentDef {
   skills?: string[];
 }
 
-export interface FileDef {
-  workspace: string;
+export interface WorkspaceFileDef {
   path: string;
   content?: string;
   content_from?: string;
@@ -138,18 +133,18 @@ export interface Recipe {
   workspaces?: WorkspaceDef[];
   channels?: ChannelDef[];
   agents?: AgentDef[];
-  files?: FileDef[];
   conversations?: ConversationDef[];
 }
 
 export interface RunOptions {
   vars: Record<string, string>;
   plugins: string[];
+  scope: RunScope;
+  workspaceName?: string;
   dryRun: boolean;
   allowMissing: boolean;
   verbose: boolean;
   silent: boolean;
-  keepOpenClawState: boolean;
   provider: OpenClawProvider;
   remote: Partial<OpenClawRemoteConfig>;
 }

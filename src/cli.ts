@@ -6,7 +6,7 @@ import { runRecipe } from "./orchestrator.js";
 import { loadRecipe, loadRecipeText } from "./recipe.js";
 import { recipeSchema } from "./schema.js";
 import { scaffoldProject } from "./scaffold.js";
-import type { RunOptions } from "./types.js";
+import type { RunOptions, RunScope } from "./types.js";
 import YAML from "js-yaml";
 import path from "node:path";
 import { createInterface } from "node:readline/promises";
@@ -44,6 +44,13 @@ function parseProvider(value: string): "command" | "mock" | "remote" {
     return value;
   }
   throw new ClawChefError(`Invalid --provider value: ${value}. Expected command, remote, or mock`);
+}
+
+function parseScope(value: string): RunScope {
+  if (value === "full" || value === "files" || value === "workspace") {
+    return value;
+  }
+  throw new ClawChefError(`Invalid --scope value: ${value}. Expected full, files, or workspace`);
 }
 
 function parseOptionalInt(value: string | undefined, fieldName: string): number | undefined {
@@ -88,7 +95,8 @@ export function buildCli(): Command {
     .option("--allow-missing", "Allow unresolved template variables", false)
     .option("--verbose", "Verbose logging", false)
     .option("-s, --silent", "Skip reset confirmation prompt", false)
-    .option("--keep-openclaw-state", "Preserve existing OpenClaw state (skip factory reset)", false)
+    .option("--scope <scope>", "Run scope: full | files | workspace", "full")
+    .option("--workspace <name>", "Workspace name (required when --scope workspace)")
     .option("--dotenv-ref <path-or-url>", "Load env vars from local file or HTTP URL")
     .option("--provider <provider>", "Execution provider: command | remote | mock")
     .option("--plugin <npm-spec>", "Preinstall plugin package (repeatable)", (v, p: string[]) => p.concat([v]), [])
@@ -106,14 +114,23 @@ export function buildCli(): Command {
       }
 
       const provider = parseProvider(opts.provider ?? readEnv("CLAWCHEF_PROVIDER") ?? "command");
+      const scope = parseScope(String(opts.scope ?? "full"));
+      const workspaceName = opts.workspace?.trim() ? String(opts.workspace).trim() : undefined;
+      if (scope === "workspace" && !workspaceName) {
+        throw new ClawChefError("--scope workspace requires --workspace <name>");
+      }
+      if (scope !== "workspace" && workspaceName) {
+        throw new ClawChefError("--workspace is only allowed when --scope workspace");
+      }
       const options: RunOptions = {
         vars: parseVarFlags(opts.var),
         plugins: parsePluginFlags(opts.plugin),
+        scope,
+        workspaceName,
         dryRun: Boolean(opts.dryRun),
         allowMissing: Boolean(opts.allowMissing),
         verbose: Boolean(opts.verbose),
         silent: Boolean(opts.silent),
-        keepOpenClawState: Boolean(opts.keepOpenclawState),
         provider,
         remote: {
           base_url: opts.remoteBaseUrl ?? readEnv("CLAWCHEF_REMOTE_BASE_URL"),

@@ -6,7 +6,7 @@ import { runRecipe } from "./orchestrator.js";
 import { loadRecipe, loadRecipeText } from "./recipe.js";
 import { scaffoldProject } from "./scaffold.js";
 import { recipeSchema } from "./schema.js";
-import type { OpenClawProvider, OpenClawRemoteConfig, RunOptions } from "./types.js";
+import type { OpenClawProvider, OpenClawRemoteConfig, RunOptions, RunScope } from "./types.js";
 import type { ScaffoldOptions, ScaffoldResult } from "./scaffold.js";
 
 export interface CookOptions {
@@ -16,6 +16,8 @@ export interface CookOptions {
   allowMissing?: boolean;
   verbose?: boolean;
   silent?: boolean;
+  scope?: RunScope;
+  workspaceName?: string;
   provider?: OpenClawProvider;
   remote?: Partial<OpenClawRemoteConfig>;
   envFile?: string;
@@ -24,14 +26,23 @@ export interface CookOptions {
 
 function normalizeCookOptions(options: CookOptions): RunOptions {
   const plugins = Array.from(new Set((options.plugins ?? []).map((value) => value.trim()).filter((value) => value.length > 0)));
+  const scope = options.scope ?? "full";
+  const workspaceName = options.workspaceName?.trim() || undefined;
+  if (scope === "workspace" && !workspaceName) {
+    throw new ClawChefError("scope=workspace requires workspaceName");
+  }
+  if (scope !== "workspace" && workspaceName) {
+    throw new ClawChefError("workspaceName is only allowed when scope=workspace");
+  }
   return {
     vars: options.vars ?? {},
     plugins,
+    scope,
+    workspaceName,
     dryRun: Boolean(options.dryRun),
     allowMissing: Boolean(options.allowMissing),
     verbose: Boolean(options.verbose),
     silent: options.silent ?? true,
-    keepOpenClawState: false,
     provider: options.provider ?? "command",
     remote: options.remote ?? {},
   };

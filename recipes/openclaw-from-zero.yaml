@@ -6,7 +6,7 @@ params:
     default: "from-zero-demo"
   openclaw_version:
     default: "2026.2.9"
-  openai_api_key:
+  llm_api_key:
     required: true
 
 openclaw:
@@ -15,7 +15,7 @@ openclaw:
   install: "never"
   bootstrap:
     auth_choice: "openai-api-key"
-    openai_api_key: "${openai_api_key}"
+    llm_api_key: "${llm_api_key}"
     mode: "local"
     flow: "quickstart"
     accept_risk: true

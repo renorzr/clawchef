@@ -13,19 +13,17 @@ openclaw:
 
 workspaces:
   - name: "${project_name}"
+    files:
+      - path: "README.md"
+        overwrite: true
+        content: |
+          # ${project_name}
+          Managed by clawchef remote HTTP provider.
 
 agents:
   - workspace: "${project_name}"
     name: "chef-openai"
     model: "openai/gpt-5.3-codex"
-
-files:
-  - workspace: "${project_name}"
-    path: "README.md"
-    overwrite: true
-    content: |
-      # ${project_name}
-      Managed by clawchef remote HTTP provider.
 
 conversations:
   - workspace: "${project_name}"

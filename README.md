@@ -12,7 +12,8 @@ Recipe-driven OpenClaw environment orchestrator.
 - Requires secrets to be injected via `--var` / `CLAWCHEF_VAR_*` (no inline secrets in recipe).
 - Prepares OpenClaw version (install or reuse).
 - When installed OpenClaw version mismatches recipe version, prompts: ignore / abort / force reinstall (silent mode auto-picks force reinstall).
-- Always runs factory reset first (with confirmation prompt unless `-s/--silent` is used).
+- Supports scoped execution via `--scope full|files|workspace`.
+- `full` scope runs factory reset first (with confirmation prompt unless `-s/--silent` is used).
 - If `openclaw` is missing, auto-installs the recipe version and skips factory reset.
 - Starts OpenClaw gateway service after each recipe execution.
 - Creates workspaces and agents (default workspace path: `~/.openclaw/workspace-<workspace-name>`).
@@ -20,7 +21,6 @@ Recipe-driven OpenClaw environment orchestrator.
 - Materializes files into target workspaces.
 - Installs skills.
 - Supports plugin preinstall via `openclaw.plugins[]` and runtime `--plugin` flags.
-- Supports preserving existing OpenClaw state via `--keep-openclaw-state` (skip factory reset).
 - Configures channels with `openclaw channels add`.
 - Supports interactive channel login at the end of execution (`channels[].login: true`) for channels that expose login.
 - Supports remote HTTP orchestration via runtime flags (`--provider remote`) when OpenClaw is reachable via API.
@@ -96,13 +96,19 @@ Use it only in CI/non-interactive flows where destructive reset behavior is expe
 Keep existing OpenClaw state (skip reset and keep current version on mismatch):
 
 ```bash
-clawchef cook recipes/sample.yaml --keep-openclaw-state
+clawchef cook recipes/sample.yaml --scope files
+```
+
+Update only one workspace:
+
+```bash
+clawchef cook recipes/sample.yaml --scope workspace --workspace workspace-meeting
 ```
 
 From-zero OpenClaw bootstrap (recommended):
 
 ```bash
-CLAWCHEF_VAR_OPENAI_API_KEY=sk-... clawchef cook recipes/openclaw-from-zero.yaml --verbose
+CLAWCHEF_VAR_LLM_API_KEY=sk-... clawchef cook recipes/openclaw-from-zero.yaml --verbose
 ```
 
 Telegram channel setup only:
@@ -183,7 +189,7 @@ await cook("recipes/sample.yaml", {
   provider: "command",
   silent: true,
   vars: {
-    openai_api_key: process.env.OPENAI_API_KEY ?? "",
+    llm_api_key: process.env.OPENAI_API_KEY ?? "",
   },
 });
 
@@ -196,6 +202,8 @@ await scaffold("./my-recipe-project", {
 
 - `vars`: template variables (`Record<string, string>`)
 - `plugins`: plugin npm specs to preinstall for this run (`string[]`)
+- `scope`: `full | files | workspace` (default: `full`)
+- `workspaceName`: required when `scope: "workspace"`
 - `provider`: `command | remote | mock`
 - `remote`: remote provider config (same fields as CLI remote flags)
 - `envFile`: custom env file path/URL; when set, default cwd `.env` loading is skipped
@@ -318,7 +326,7 @@ Supported fields include:
 
 - onboarding: `mode`, `flow`, `non_interactive`, `accept_risk`, `reset`
 - setup toggles: `skip_channels`, `skip_skills`, `skip_health`, `skip_ui`, `skip_daemon`, `install_daemon`
-- auth/provider: `auth_choice`, `openai_api_key`, `anthropic_api_key`, `openrouter_api_key`, `xai_api_key`, `gemini_api_key`, `ai_gateway_api_key`, `cloudflare_ai_gateway_api_key`, `token`, `token_provider`, `token_profile_id`
+- auth/provider: `auth_choice`, `llm_api_key`, `token`, `token_provider`, `token_profile_id`
 
 ### Plugin preinstall
 
@@ -334,7 +342,7 @@ openclaw:
     - "@scope/custom-channel-plugin@1.2.3"
 ```
 
-When `openclaw.bootstrap` contains provider keys, `clawchef` also injects them into runtime env for `openclaw agent --local`.
+When `openclaw.bootstrap` contains `llm_api_key`, clawchef maps it to the provider-specific runtime env by `auth_choice` for `openclaw agent --local`.
 
 For `command` provider, default command templates are:
 
@@ -394,7 +402,7 @@ Supported common fields:
 - `workspaces[].assets` is optional.
 - If `assets` is set, clawchef recursively copies files from that directory into the workspace root.
 - `assets` is resolved relative to the recipe file path (unless absolute path is given).
-- `files[]` runs after assets copy, so `files[]` can override copied asset files.
+- `workspaces[].files[]` runs after assets copy, so explicit file entries can override copied asset files.
 - Direct URL recipes do not support `workspaces[].assets` (assets must resolve to a local directory).
 - If provided, relative paths are resolved from the recipe file directory.
 - For direct URL recipe files, relative workspace paths are resolved from the current working directory.
@@ -410,10 +418,10 @@ workspaces:
 
 ## File content references
 
-In `files[]`, set exactly one of:
+In `workspaces[].files[]`, set exactly one of:
 
 - `content`: inline text in recipe
-- `content_from`: load text from another file/URL
+- `content_from`: load text from another file/URL (loaded content supports `${var}` template rendering)
 - `source`: copy raw file bytes from another file/URL
 
 `content_from` and `source` accept:
@@ -433,8 +441,8 @@ Useful placeholders when overriding commands:
 
 - Do not put plaintext API keys/tokens in recipe files.
 - Use `${var}` placeholders in recipe and pass values via:
-  - `--var openai_api_key=...`
-  - `CLAWCHEF_VAR_OPENAI_API_KEY=...`
+  - `--var llm_api_key=...`
+  - `CLAWCHEF_VAR_LLM_API_KEY=...`
 - Inline secrets in `openclaw.bootstrap.*` are rejected by validation.
 
 ## Conversation message format

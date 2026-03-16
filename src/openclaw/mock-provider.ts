@@ -25,7 +25,7 @@ export class MockOpenClawProvider implements OpenClawProvider {
     config: OpenClawSection,
     _dryRun: boolean,
     _silent: boolean,
-    _keepOpenClawState: boolean,
+    _preserveExistingState: boolean,
   ): Promise<EnsureVersionResult> {
     const policy = config.install ?? "auto";
     const installed = this.state.installedVersions.has(config.version);

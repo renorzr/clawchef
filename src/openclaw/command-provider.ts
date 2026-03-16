@@ -35,27 +35,33 @@ const SECRET_FLAG_RE =
   /(--[A-Za-z0-9-]*(?:api-key|token|password|secret)[A-Za-z0-9-]*\s+)(?:'[^']*'|"[^"]*"|\S+)/g;
 
 type BootstrapStringField =
-  | "openai_api_key"
-  | "anthropic_api_key"
-  | "openrouter_api_key"
-  | "xai_api_key"
-  | "gemini_api_key"
-  | "ai_gateway_api_key"
-  | "cloudflare_ai_gateway_api_key"
   | "cloudflare_ai_gateway_account_id"
   | "cloudflare_ai_gateway_gateway_id"
   | "token"
   | "token_provider"
   | "token_profile_id";
 
+const AUTH_CHOICE_TO_LLM_FLAG: Record<string, string> = {
+  "openai-api-key": "--openai-api-key",
+  "anthropic-api-key": "--anthropic-api-key",
+  "openrouter-api-key": "--openrouter-api-key",
+  "xai-api-key": "--xai-api-key",
+  "gemini-api-key": "--gemini-api-key",
+  "ai-gateway-api-key": "--ai-gateway-api-key",
+  "cloudflare-ai-gateway-api-key": "--cloudflare-ai-gateway-api-key",
+};
+
+const AUTH_CHOICE_TO_LLM_ENV: Record<string, string> = {
+  "openai-api-key": "OPENAI_API_KEY",
+  "anthropic-api-key": "ANTHROPIC_API_KEY",
+  "openrouter-api-key": "OPENROUTER_API_KEY",
+  "xai-api-key": "XAI_API_KEY",
+  "gemini-api-key": "GEMINI_API_KEY",
+  "ai-gateway-api-key": "AI_GATEWAY_API_KEY",
+  "cloudflare-ai-gateway-api-key": "CLOUDFLARE_AI_GATEWAY_API_KEY",
+};
+
 const BOOTSTRAP_STRING_FLAGS: Array<[BootstrapStringField, string]> = [
-  ["openai_api_key", "--openai-api-key"],
-  ["anthropic_api_key", "--anthropic-api-key"],
-  ["openrouter_api_key", "--openrouter-api-key"],
-  ["xai_api_key", "--xai-api-key"],
-  ["gemini_api_key", "--gemini-api-key"],
-  ["ai_gateway_api_key", "--ai-gateway-api-key"],
-  ["cloudflare_ai_gateway_api_key", "--cloudflare-ai-gateway-api-key"],
   ["cloudflare_ai_gateway_account_id", "--cloudflare-ai-gateway-account-id"],
   ["cloudflare_ai_gateway_gateway_id", "--cloudflare-ai-gateway-gateway-id"],
   ["token", "--token"],
@@ -239,6 +245,13 @@ function buildBootstrapCommand(bin: string, bootstrap: OpenClawBootstrap | undef
     flags.push("--no-install-daemon");
   }
 
+  if (cfg.llm_api_key?.trim()) {
+    const llmFlag = AUTH_CHOICE_TO_LLM_FLAG[cfg.auth_choice ?? ""];
+    if (llmFlag) {
+      flags.push(`${llmFlag} ${shellQuote(cfg.llm_api_key)}`);
+    }
+  }
+
   for (const [field, flag] of BOOTSTRAP_STRING_FLAGS) {
     const value = cfg[field];
     if (value && value.trim()) {
@@ -257,14 +270,11 @@ function bootstrapRuntimeEnv(bootstrap: OpenClawBootstrap | undefined): Record<s
   }
   const env: Record<string, string> = {};
 
-  if (bootstrap.openai_api_key) env.OPENAI_API_KEY = bootstrap.openai_api_key;
-  if (bootstrap.anthropic_api_key) env.ANTHROPIC_API_KEY = bootstrap.anthropic_api_key;
-  if (bootstrap.openrouter_api_key) env.OPENROUTER_API_KEY = bootstrap.openrouter_api_key;
-  if (bootstrap.xai_api_key) env.XAI_API_KEY = bootstrap.xai_api_key;
-  if (bootstrap.gemini_api_key) env.GEMINI_API_KEY = bootstrap.gemini_api_key;
-  if (bootstrap.ai_gateway_api_key) env.AI_GATEWAY_API_KEY = bootstrap.ai_gateway_api_key;
-  if (bootstrap.cloudflare_ai_gateway_api_key) {
-    env.CLOUDFLARE_AI_GATEWAY_API_KEY = bootstrap.cloudflare_ai_gateway_api_key;
+  if (bootstrap.llm_api_key?.trim()) {
+    const envKey = AUTH_CHOICE_TO_LLM_ENV[bootstrap.auth_choice ?? ""];
+    if (envKey) {
+      env[envKey] = bootstrap.llm_api_key;
+    }
   }
 
   return env;
@@ -277,7 +287,7 @@ export class CommandOpenClawProvider implements OpenClawProvider {
     config: OpenClawSection,
     dryRun: boolean,
     silent: boolean,
-    keepOpenClawState: boolean,
+    preserveExistingState: boolean,
   ): Promise<EnsureVersionResult> {
     const bin = config.bin ?? "openclaw";
     const installPolicy = config.install ?? "auto";
@@ -343,7 +353,7 @@ export class CommandOpenClawProvider implements OpenClawProvider {
       );
     }
 
-    if (keepOpenClawState) {
+    if (preserveExistingState) {
       return { installedThisRun: false };
     }
 

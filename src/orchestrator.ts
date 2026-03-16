@@ -27,6 +27,26 @@ function truncateForLog(text: string, maxLength = 500): string {
   return `${text.slice(0, maxLength)}... [truncated ${text.length - maxLength} chars]`;
 }
 
+function renderTemplateString(input: string, vars: Record<string, string>, allowMissing: boolean): string {
+  return input.replace(/\$\{([^}]+)\}/g, (_match, rawKey: string) => {
+    const key = String(rawKey).trim();
+    if (!key) {
+      return "";
+    }
+    if (Object.prototype.hasOwnProperty.call(vars, key)) {
+      return vars[key] ?? "";
+    }
+    const lowerKey = key.toLowerCase();
+    if (Object.prototype.hasOwnProperty.call(vars, lowerKey)) {
+      return vars[lowerKey] ?? "";
+    }
+    if (allowMissing) {
+      return `\${${key}}`;
+    }
+    throw new ClawChefError(`Missing template variable in file content: ${key}`);
+  });
+}
+
 function resolveWorkspacePath(recipeOrigin: RecipeOrigin, name: string, configuredPath?: string): string {
   if (configuredPath?.trim()) {
     if (path.isAbsolute(configuredPath)) {
@@ -146,19 +166,20 @@ export async function runRecipe(
   const provider = createProvider(options);
   const remoteMode = options.provider === "remote";
   const workspacePaths = new Map<string, string>();
+  const preserveExistingState = options.scope !== "full";
 
   logger.info(`Running recipe: ${recipe.name}`);
   const versionResult = await provider.ensureVersion(
     recipe.openclaw,
     options.dryRun,
     options.silent,
-    options.keepOpenClawState,
+    preserveExistingState,
   );
   logger.info(`OpenClaw version ready: ${recipe.openclaw.version}`);
 
   if (versionResult.installedThisRun) {
     logger.info("OpenClaw was installed in this run; skipping factory reset");
-  } else if (options.keepOpenClawState) {
+  } else if (preserveExistingState) {
     logger.info("Keeping existing OpenClaw state; skipping factory reset");
   } else {
     const confirmed = await confirmFactoryReset(options);
@@ -244,63 +265,67 @@ export async function runRecipe(
     logger.info(`Channel configured: ${channel.channel}${channel.account ? `/${channel.account}` : ""}`);
   }
 
-  for (const file of recipe.files ?? []) {
-    const wsPath = workspacePaths.get(file.workspace);
+  for (const workspace of recipe.workspaces ?? []) {
+    const wsPath = workspacePaths.get(workspace.name);
     if (!wsPath) {
-      throw new ClawChefError(`File target workspace does not exist: ${file.workspace}`);
+      throw new ClawChefError(`Workspace does not exist for files: ${workspace.name}`);
     }
 
-    if (provider.materializeFile) {
-      let content = file.content;
-      if (content === undefined && file.content_from) {
-        if (!options.dryRun) {
-          content = await readTextFromRef(recipeOrigin, file.content_from);
-        } else {
-          const resolved = resolveFileRef(recipeOrigin, file.content_from);
-          content = `__dry_run_content_from__:${resolved.value}`;
+    for (const file of workspace.files ?? []) {
+      if (provider.materializeFile) {
+        let content = file.content;
+        if (content === undefined && file.content_from) {
+          if (!options.dryRun) {
+            const rawContent = await readTextFromRef(recipeOrigin, file.content_from);
+            content = renderTemplateString(rawContent, options.vars, options.allowMissing);
+          } else {
+            const resolved = resolveFileRef(recipeOrigin, file.content_from);
+            content = `__dry_run_content_from__:${resolved.value}`;
+          }
         }
+        if (content === undefined && file.source) {
+          if (!options.dryRun) {
+            content = await readTextFromRef(recipeOrigin, file.source);
+          } else {
+            const resolved = resolveFileRef(recipeOrigin, file.source);
+            content = `__dry_run_source__:${resolved.value}`;
+          }
+        }
+        if (content === undefined) {
+          throw new ClawChefError(`File ${file.path} requires content, content_from, or source`);
+        }
+
+        await provider.materializeFile(recipe.openclaw, workspace.name, file.path, content, file.overwrite, options.dryRun);
+        logger.info(`File materialized: ${workspace.name}/${file.path}`);
+        continue;
       }
-      if (content === undefined && file.source) {
-        if (!options.dryRun) {
-          content = await readTextFromRef(recipeOrigin, file.source);
-        } else {
+
+      const target = path.resolve(wsPath, file.path);
+      const targetDir = path.dirname(target);
+
+      if (!options.dryRun) {
+        await mkdir(targetDir, { recursive: true });
+        const alreadyExists = await exists(target);
+        if (alreadyExists && file.overwrite === false) {
+          logger.warn(`Skipping existing file: ${target}`);
+        } else if (file.content !== undefined) {
+          await writeFile(target, file.content, "utf8");
+        } else if (file.content_from) {
+          const rawContent = await readTextFromRef(recipeOrigin, file.content_from);
+          const content = renderTemplateString(rawContent, options.vars, options.allowMissing);
+          await writeFile(target, content, "utf8");
+        } else if (file.source) {
           const resolved = resolveFileRef(recipeOrigin, file.source);
-          content = `__dry_run_source__:${resolved.value}`;
+          if (resolved.kind === "local") {
+            await copyFile(resolved.value, target);
+          } else {
+            const content = await readBinaryFromRef(recipeOrigin, file.source);
+            await writeFile(target, content);
+          }
         }
       }
-      if (content === undefined) {
-        throw new ClawChefError(`File ${file.path} requires content, content_from, or source`);
-      }
-
-      await provider.materializeFile(recipe.openclaw, file.workspace, file.path, content, file.overwrite, options.dryRun);
-      logger.info(`File materialized: ${file.workspace}/${file.path}`);
-      continue;
+      logger.info(`File materialized: ${workspace.name}/${file.path}`);
     }
-
-    const target = path.resolve(wsPath, file.path);
-    const targetDir = path.dirname(target);
-
-    if (!options.dryRun) {
-      await mkdir(targetDir, { recursive: true });
-      const alreadyExists = await exists(target);
-      if (alreadyExists && file.overwrite === false) {
-        logger.warn(`Skipping existing file: ${target}`);
-      } else if (file.content !== undefined) {
-        await writeFile(target, file.content, "utf8");
-      } else if (file.content_from) {
-        const content = await readTextFromRef(recipeOrigin, file.content_from);
-        await writeFile(target, content, "utf8");
-      } else if (file.source) {
-        const resolved = resolveFileRef(recipeOrigin, file.source);
-        if (resolved.kind === "local") {
-          await copyFile(resolved.value, target);
-        } else {
-          const content = await readBinaryFromRef(recipeOrigin, file.source);
-          await writeFile(target, content);
-        }
-      }
-    }
-    logger.info(`File materialized: ${file.workspace}/${file.path}`);
   }
 
   for (const agent of recipe.agents ?? []) {

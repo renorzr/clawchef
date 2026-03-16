@@ -32,24 +32,18 @@ export interface LoadedRecipeText {
 }
 
 const AUTH_CHOICE_TO_FIELD: Record<string, string> = {
-  "openai-api-key": "openai_api_key",
-  "anthropic-api-key": "anthropic_api_key",
-  "openrouter-api-key": "openrouter_api_key",
-  "xai-api-key": "xai_api_key",
-  "gemini-api-key": "gemini_api_key",
-  "ai-gateway-api-key": "ai_gateway_api_key",
-  "cloudflare-ai-gateway-api-key": "cloudflare_ai_gateway_api_key",
+  "openai-api-key": "llm_api_key",
+  "anthropic-api-key": "llm_api_key",
+  "openrouter-api-key": "llm_api_key",
+  "xai-api-key": "llm_api_key",
+  "gemini-api-key": "llm_api_key",
+  "ai-gateway-api-key": "llm_api_key",
+  "cloudflare-ai-gateway-api-key": "llm_api_key",
   token: "token",
 };
 
 const SECRET_BOOTSTRAP_FIELDS = [
-  "openai_api_key",
-  "anthropic_api_key",
-  "openrouter_api_key",
-  "xai_api_key",
-  "gemini_api_key",
-  "ai_gateway_api_key",
-  "cloudflare_ai_gateway_api_key",
+  "llm_api_key",
   "token",
 ] as const;
 
@@ -124,7 +118,7 @@ function assertNoInlineSecrets(recipe: Recipe): void {
   }
 }
 
-function collectVars(recipe: Recipe, cliVars: Record<string, string>): Record<string, string> {
+function collectVars(recipe: Recipe, cliVars: Record<string, string>, requiredKeys?: Set<string>): Record<string, string> {
   const vars: Record<string, string> = {};
   const params = recipe.params ?? {};
 
@@ -155,7 +149,7 @@ function collectVars(recipe: Recipe, cliVars: Record<string, string>): Record<st
       vars[key] = def.default;
       continue;
     }
-    if (def.required) {
+    if (def.required && (requiredKeys === undefined || requiredKeys.has(key))) {
       throw new ClawChefError(`Parameter ${key} is required but was not provided via --var or environment`);
     }
   }
@@ -165,6 +159,36 @@ function collectVars(recipe: Recipe, cliVars: Record<string, string>): Record<st
   }
 
   return vars;
+}
+
+function projectRecipeForScope(recipe: Recipe, options: RunOptions): Recipe {
+  if (options.scope !== "workspace") {
+    return recipe;
+  }
+
+  return {
+    ...recipe,
+    openclaw: {
+      ...recipe.openclaw,
+      bootstrap: undefined,
+    },
+    channels: [],
+    conversations: [],
+  };
+}
+
+function filterRecipeByWorkspaceName(recipe: Recipe, workspaceName: string): Recipe {
+  const workspace = (recipe.workspaces ?? []).find((ws) => ws.name === workspaceName);
+  if (!workspace) {
+    throw new ClawChefError(`Workspace not found in recipe: ${workspaceName}`);
+  }
+
+  return {
+    ...recipe,
+    workspaces: [workspace],
+    agents: (recipe.agents ?? []).filter((agent) => agent.workspace === workspaceName),
+    conversations: (recipe.conversations ?? []).filter((conv) => conv.workspace === workspaceName),
+  };
 }
 
 function semanticValidate(recipe: Recipe): void {
@@ -179,9 +203,11 @@ function semanticValidate(recipe: Recipe): void {
       throw new ClawChefError(`Agent ${agent.name} references missing workspace: ${agent.workspace}`);
     }
   }
-  for (const file of recipe.files ?? []) {
-    if (!ws.has(file.workspace)) {
-      throw new ClawChefError(`File ${file.path} references missing workspace: ${file.workspace}`);
+  for (const workspace of recipe.workspaces ?? []) {
+    for (const file of workspace.files ?? []) {
+      if (!file.path.trim()) {
+        throw new ClawChefError(`Workspace ${workspace.name} has file with empty path`);
+      }
     }
   }
   const agents = new Set((recipe.agents ?? []).map((a) => `${a.workspace}::${a.name}`));
@@ -752,18 +778,31 @@ export async function loadRecipe(recipePath: string, options: RunOptions): Promi
       throw new ClawChefError(`Recipe format is invalid: ${firstParse.error.message}`);
     }
 
-    assertNoInlineSecrets(firstParse.data);
+    const projected = projectRecipeForScope(firstParse.data, options);
 
-    const vars = collectVars(firstParse.data, options.vars);
-    const rendered = deepResolveTemplates(firstParse.data, vars, options.allowMissing);
+    assertNoInlineSecrets(projected);
+
+    const requiredKeys = options.scope === "workspace" ? new Set<string>() : undefined;
+    const vars = collectVars(projected, options.vars, requiredKeys);
+    const rendered = deepResolveTemplates(projected, vars, options.allowMissing);
     const secondParse = recipeSchema.safeParse(rendered);
     if (!secondParse.success) {
       throw new ClawChefError(`Recipe is invalid after parameter resolution: ${secondParse.error.message}`);
     }
 
-    semanticValidate(secondParse.data);
+    const scopedRecipe = (() => {
+      if (options.scope !== "workspace") {
+        return secondParse.data;
+      }
+      if (!options.workspaceName) {
+        throw new ClawChefError("scope=workspace requires a workspace name");
+      }
+      return filterRecipeByWorkspaceName(secondParse.data, options.workspaceName);
+    })();
+
+    semanticValidate(scopedRecipe);
     return {
-      recipe: secondParse.data,
+      recipe: scopedRecipe,
       origin: recipeRef.origin,
     };
   });

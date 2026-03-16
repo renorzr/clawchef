@@ -39,13 +39,7 @@ const openClawBootstrapSchema = z
     skip_ui: z.boolean().optional(),
     skip_daemon: z.boolean().optional(),
     install_daemon: z.boolean().optional(),
-    openai_api_key: z.string().optional(),
-    anthropic_api_key: z.string().optional(),
-    openrouter_api_key: z.string().optional(),
-    xai_api_key: z.string().optional(),
-    gemini_api_key: z.string().optional(),
-    ai_gateway_api_key: z.string().optional(),
-    cloudflare_ai_gateway_api_key: z.string().optional(),
+    llm_api_key: z.string().optional(),
     cloudflare_ai_gateway_account_id: z.string().optional(),
     cloudflare_ai_gateway_gateway_id: z.string().optional(),
     token: z.string().optional(),
@@ -70,6 +64,22 @@ const workspaceSchema = z
     name: z.string().min(1),
     path: z.string().min(1).optional(),
     assets: z.string().min(1).optional(),
+    files: z
+      .array(
+        z
+          .object({
+            path: z.string().min(1),
+            content: z.string().optional(),
+            content_from: z.string().min(1).optional(),
+            source: z.string().optional(),
+            overwrite: z.boolean().optional(),
+          })
+          .strict()
+          .refine((v) => [v.content, v.content_from, v.source].filter((item) => item !== undefined).length === 1, {
+            message: "workspaces[].files[] requires exactly one of content, content_from, or source",
+          }),
+      )
+      .optional(),
   })
   .strict();
 
@@ -103,20 +113,6 @@ const agentSchema = z
     skills: z.array(z.string().min(1)).optional(),
   })
   .strict();
-
-const fileSchema = z
-  .object({
-    workspace: z.string().min(1),
-    path: z.string().min(1),
-    content: z.string().optional(),
-    content_from: z.string().min(1).optional(),
-    source: z.string().optional(),
-    overwrite: z.boolean().optional(),
-  })
-  .strict()
-  .refine((v) => [v.content, v.content_from, v.source].filter((item) => item !== undefined).length === 1, {
-    message: "files[] requires exactly one of content, content_from, or source",
-  });
 
 const conversationExpectSchema = z
   .object({
@@ -152,7 +148,6 @@ export const recipeSchema = z
     workspaces: z.array(workspaceSchema).optional(),
     channels: z.array(channelSchema).optional(),
     agents: z.array(agentSchema).optional(),
-    files: z.array(fileSchema).optional(),
     conversations: z.array(conversationSchema).optional(),
   })
   .strict();

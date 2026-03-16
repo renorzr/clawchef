@@ -11,7 +11,7 @@ export interface OpenClawProvider {
     config: OpenClawSection,
     dryRun: boolean,
     silent: boolean,
-    keepOpenClawState: boolean,
+    preserveExistingState: boolean,
   ): Promise<EnsureVersionResult>;
   installPlugin(config: OpenClawSection, pluginSpec: string, dryRun: boolean): Promise<void>;
   factoryReset(config: OpenClawSection, dryRun: boolean): Promise<void>;
