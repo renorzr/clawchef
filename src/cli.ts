@@ -9,8 +9,23 @@ import { scaffoldProject } from "./scaffold.js";
 import type { RunOptions, RunScope } from "./types.js";
 import YAML from "js-yaml";
 import path from "node:path";
+import { readFileSync } from "node:fs";
 import { createInterface } from "node:readline/promises";
 import { stdin as input, stdout as output } from "node:process";
+
+function readPackageVersion(): string {
+  try {
+    const pkgPath = new URL("../package.json", import.meta.url);
+    const content = readFileSync(pkgPath, "utf8");
+    const parsed = JSON.parse(content) as { version?: string };
+    if (parsed.version?.trim()) {
+      return parsed.version;
+    }
+  } catch {
+    // ignore and use fallback
+  }
+  return "0.0.0";
+}
 
 function parseVarFlags(values: string[]): Record<string, string> {
   const out: Record<string, string> = {};
@@ -85,7 +100,7 @@ export function buildCli(): Command {
   program
     .name("clawchef")
     .description("Run OpenClaw environment recipes")
-    .version("0.1.6");
+    .version(readPackageVersion());
 
   program
     .command("cook")
