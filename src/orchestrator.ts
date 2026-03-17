@@ -84,6 +84,10 @@ function isHttpUrl(value: string): boolean {
   }
 }
 
+function isNotFoundError(err: unknown): boolean {
+  return typeof err === "object" && err !== null && "code" in err && (err as { code?: string }).code === "ENOENT";
+}
+
 function resolveFileRef(recipeOrigin: RecipeOrigin, reference: string): { kind: "local" | "url"; value: string } {
   if (isHttpUrl(reference)) {
     return { kind: "url", value: reference };
@@ -233,21 +237,28 @@ export async function runRecipe(
       try {
         assetDirStat = await stat(resolvedAssets.value);
       } catch (err) {
-        const message = err instanceof Error ? err.message : String(err);
-        throw new ClawChefError(`openclaw.root.assets path is not accessible: ${resolvedAssets.value} (${message})`);
-      }
-      if (!assetDirStat.isDirectory()) {
-        throw new ClawChefError(`openclaw.root.assets must be a directory: ${resolvedAssets.value}`);
-      }
-
-      const assetFiles = await collectLocalAssetFiles(resolvedAssets.value);
-      for (const assetFile of assetFiles) {
-        const target = path.resolve(openclawRootPath, assetFile.relativePath);
-        if (!options.dryRun) {
-          await mkdir(path.dirname(target), { recursive: true });
-          await copyFile(assetFile.absolutePath, target);
+        if (isNotFoundError(err)) {
+          logger.warn(`Skipping missing openclaw.root.assets directory: ${resolvedAssets.value}`);
+          assetDirStat = undefined;
+        } else {
+          const message = err instanceof Error ? err.message : String(err);
+          throw new ClawChefError(`openclaw.root.assets path is not accessible: ${resolvedAssets.value} (${message})`);
         }
-        logger.info(`OpenClaw root asset copied: ${assetFile.relativePath}`);
+      }
+      if (!assetDirStat) {
+        // missing assets path is non-fatal by design
+      } else if (!assetDirStat.isDirectory()) {
+        throw new ClawChefError(`openclaw.root.assets must be a directory: ${resolvedAssets.value}`);
+      } else {
+        const assetFiles = await collectLocalAssetFiles(resolvedAssets.value);
+        for (const assetFile of assetFiles) {
+          const target = path.resolve(openclawRootPath, assetFile.relativePath);
+          if (!options.dryRun) {
+            await mkdir(path.dirname(target), { recursive: true });
+            await copyFile(assetFile.absolutePath, target);
+          }
+          logger.info(`OpenClaw root asset copied: ${assetFile.relativePath}`);
+        }
       }
     }
 
@@ -304,6 +315,10 @@ export async function runRecipe(
     try {
       assetDirStat = await stat(resolvedAssets.value);
     } catch (err) {
+      if (isNotFoundError(err)) {
+        logger.warn(`Skipping missing workspace assets directory: ${resolvedAssets.value}`);
+        continue;
+      }
       const message = err instanceof Error ? err.message : String(err);
       throw new ClawChefError(`Workspace assets path is not accessible: ${resolvedAssets.value} (${message})`);
     }
