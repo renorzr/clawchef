@@ -6,7 +6,7 @@ import { runRecipe } from "./orchestrator.js";
 import { loadRecipe, loadRecipeText } from "./recipe.js";
 import { scaffoldProject } from "./scaffold.js";
 import { recipeSchema } from "./schema.js";
-import type { OpenClawProvider, OpenClawRemoteConfig, RunOptions, RunScope } from "./types.js";
+import type { GatewayMode, OpenClawProvider, OpenClawRemoteConfig, RunOptions, RunScope } from "./types.js";
 import type { ScaffoldOptions, ScaffoldResult } from "./scaffold.js";
 
 export interface CookOptions {
@@ -18,6 +18,7 @@ export interface CookOptions {
   silent?: boolean;
   scope?: RunScope;
   workspaceName?: string;
+  gatewayMode?: GatewayMode;
   provider?: OpenClawProvider;
   remote?: Partial<OpenClawRemoteConfig>;
   envFile?: string;
@@ -39,6 +40,7 @@ function normalizeCookOptions(options: CookOptions): RunOptions {
     plugins,
     scope,
     workspaceName,
+    gatewayMode: options.gatewayMode ?? "service",
     dryRun: Boolean(options.dryRun),
     allowMissing: Boolean(options.allowMissing),
     verbose: Boolean(options.verbose),

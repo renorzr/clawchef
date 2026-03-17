@@ -194,6 +194,18 @@ function filterRecipeByWorkspaceName(recipe: Recipe, workspaceName: string): Rec
 function semanticValidate(recipe: Recipe): void {
   const ws = new Set((recipe.workspaces ?? []).map((w) => w.name));
   const agentNameCounts = new Map<string, number>();
+  const root = recipe.openclaw.root;
+  if (root?.path !== undefined && !root.path.trim()) {
+    throw new ClawChefError("openclaw.root.path cannot be empty");
+  }
+  if (root?.assets !== undefined && !root.assets.trim()) {
+    throw new ClawChefError("openclaw.root.assets cannot be empty");
+  }
+  for (const file of root?.files ?? []) {
+    if (!file.path.trim()) {
+      throw new ClawChefError("openclaw.root.files[] has file with empty path");
+    }
+  }
   for (const workspace of recipe.workspaces ?? []) {
     if (workspace.assets !== undefined && !workspace.assets.trim()) {
       throw new ClawChefError(`Workspace ${workspace.name} has empty assets path`);

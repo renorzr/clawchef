@@ -12,6 +12,13 @@ params:
 openclaw:
   version: "${openclaw_version}"
   install: "auto"
+  root:
+    files:
+      - path: "AGENTS.md"
+        overwrite: true
+        content: |
+          # OpenClaw Root
+          Project: ${project_name}
 
 workspaces:
   - name: "${project_name}"

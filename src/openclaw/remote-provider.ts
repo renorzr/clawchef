@@ -3,6 +3,7 @@ import type {
   AgentDef,
   ChannelDef,
   ConversationDef,
+  GatewayMode,
   OpenClawRemoteConfig,
   OpenClawSection,
 } from "../types.js";
@@ -176,8 +177,11 @@ export class RemoteOpenClawProvider implements OpenClawProvider {
     await this.perform(config, "factory_reset", undefined, dryRun);
   }
 
-  async startGateway(config: OpenClawSection, dryRun: boolean): Promise<void> {
-    await this.perform(config, "start_gateway", undefined, dryRun);
+  async startGateway(config: OpenClawSection, mode: GatewayMode, dryRun: boolean): Promise<void> {
+    if (mode === "none") {
+      return;
+    }
+    await this.perform(config, "start_gateway", { mode }, dryRun);
   }
 
   async createWorkspace(config: OpenClawSection, workspace: ResolvedWorkspaceDef, dryRun: boolean): Promise<void> {

@@ -6,7 +6,7 @@ import { runRecipe } from "./orchestrator.js";
 import { loadRecipe, loadRecipeText } from "./recipe.js";
 import { recipeSchema } from "./schema.js";
 import { scaffoldProject } from "./scaffold.js";
-import type { RunOptions, RunScope } from "./types.js";
+import type { GatewayMode, RunOptions, RunScope } from "./types.js";
 import YAML from "js-yaml";
 import path from "node:path";
 import { readFileSync } from "node:fs";
@@ -68,6 +68,13 @@ function parseScope(value: string): RunScope {
   throw new ClawChefError(`Invalid --scope value: ${value}. Expected full, files, or workspace`);
 }
 
+function parseGatewayMode(value: string): GatewayMode {
+  if (value === "service" || value === "run" || value === "none") {
+    return value;
+  }
+  throw new ClawChefError(`Invalid --gateway-mode value: ${value}. Expected service, run, or none`);
+}
+
 function parseOptionalInt(value: string | undefined, fieldName: string): number | undefined {
   if (value === undefined) {
     return undefined;
@@ -112,6 +119,7 @@ export function buildCli(): Command {
     .option("-s, --silent", "Skip reset confirmation prompt", false)
     .option("--scope <scope>", "Run scope: full | files | workspace", "full")
     .option("--workspace <name>", "Workspace name (required when --scope workspace)")
+    .option("--gateway-mode <mode>", "Gateway mode: service | run | none", "service")
     .option("--dotenv-ref <path-or-url>", "Load env vars from local file or HTTP URL")
     .option("--provider <provider>", "Execution provider: command | remote | mock")
     .option("--plugin <npm-spec>", "Preinstall plugin package (repeatable)", (v, p: string[]) => p.concat([v]), [])
@@ -130,6 +138,7 @@ export function buildCli(): Command {
 
       const provider = parseProvider(opts.provider ?? readEnv("CLAWCHEF_PROVIDER") ?? "command");
       const scope = parseScope(String(opts.scope ?? "full"));
+      const gatewayMode = parseGatewayMode(String(opts.gatewayMode ?? "service"));
       const workspaceName = opts.workspace?.trim() ? String(opts.workspace).trim() : undefined;
       if (scope === "workspace" && !workspaceName) {
         throw new ClawChefError("--scope workspace requires --workspace <name>");
@@ -142,6 +151,7 @@ export function buildCli(): Command {
         plugins: parsePluginFlags(opts.plugin),
         scope,
         workspaceName,
+        gatewayMode,
         dryRun: Boolean(opts.dryRun),
         allowMissing: Boolean(opts.allowMissing),
         verbose: Boolean(opts.verbose),

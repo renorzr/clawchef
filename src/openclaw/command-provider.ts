@@ -6,7 +6,7 @@ import { spawn } from "node:child_process";
 import { createInterface } from "node:readline/promises";
 import { stdin as input, stdout as output } from "node:process";
 import { ClawChefError } from "../errors.js";
-import type { AgentDef, ChannelDef, ConversationDef, OpenClawBootstrap, OpenClawSection } from "../types.js";
+import type { AgentDef, ChannelDef, ConversationDef, GatewayMode, OpenClawBootstrap, OpenClawSection } from "../types.js";
 import type { EnsureVersionResult, OpenClawProvider, ResolvedWorkspaceDef } from "./provider.js";
 
 const DEFAULT_COMMANDS = {
@@ -16,6 +16,7 @@ const DEFAULT_COMMANDS = {
   install_plugin: "${bin} plugins install ${plugin_spec_q}",
   factory_reset: "${bin} reset --scope full --yes --non-interactive",
   start_gateway: "${bin} gateway start",
+  run_gateway: "${bin} gateway run",
   enable_plugin: "",
   bind_channel_agent: "",
   login_channel: "${bin} channels login --channel ${channel_q}${account_arg}",
@@ -464,9 +465,14 @@ export class CommandOpenClawProvider implements OpenClawProvider {
     await runShell(cmd, dryRun);
   }
 
-  async startGateway(config: OpenClawSection, dryRun: boolean): Promise<void> {
+  async startGateway(config: OpenClawSection, mode: GatewayMode, dryRun: boolean): Promise<void> {
+    if (mode === "none") {
+      return;
+    }
+
     const bin = config.bin ?? "openclaw";
-    const startCmd = commandFor(config, "start_gateway", { bin, version: config.version });
+    const key = mode === "run" ? "run_gateway" : "start_gateway";
+    const startCmd = commandFor(config, key, { bin, version: config.version });
     if (!startCmd.trim()) {
       return;
     }

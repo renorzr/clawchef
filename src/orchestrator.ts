@@ -62,6 +62,19 @@ function resolveWorkspacePath(recipeOrigin: RecipeOrigin, name: string, configur
   return path.join(homedir(), ".openclaw", workspaceName);
 }
 
+function resolveOpenClawRootPath(recipeOrigin: RecipeOrigin, configuredPath?: string): string {
+  if (configuredPath?.trim()) {
+    if (path.isAbsolute(configuredPath)) {
+      return configuredPath;
+    }
+    if (recipeOrigin.kind === "local") {
+      return path.resolve(recipeOrigin.recipeDir, configuredPath);
+    }
+    return path.resolve(configuredPath);
+  }
+  return path.join(homedir(), ".openclaw");
+}
+
 function isHttpUrl(value: string): boolean {
   try {
     const url = new URL(value);
@@ -195,6 +208,76 @@ export async function runRecipe(
   for (const pluginSpec of pluginSpecs) {
     await provider.installPlugin(recipe.openclaw, pluginSpec, options.dryRun);
     logger.info(`Plugin preinstalled: ${pluginSpec}`);
+  }
+
+  const root = recipe.openclaw.root;
+  if (root && (root.assets?.trim() || (root.files?.length ?? 0) > 0)) {
+    if (remoteMode) {
+      throw new ClawChefError("openclaw.root assets/files are not supported with --provider remote");
+    }
+
+    const openclawRootPath = resolveOpenClawRootPath(recipeOrigin, root.path);
+    if (!options.dryRun) {
+      await mkdir(openclawRootPath, { recursive: true });
+    }
+
+    if (root.assets?.trim()) {
+      const resolvedAssets = resolveFileRef(recipeOrigin, root.assets);
+      if (resolvedAssets.kind !== "local") {
+        throw new ClawChefError(
+          `openclaw.root.assets must resolve to a local directory: ${root.assets}. Direct URL recipes cannot use openclaw.root.assets.`,
+        );
+      }
+
+      let assetDirStat;
+      try {
+        assetDirStat = await stat(resolvedAssets.value);
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        throw new ClawChefError(`openclaw.root.assets path is not accessible: ${resolvedAssets.value} (${message})`);
+      }
+      if (!assetDirStat.isDirectory()) {
+        throw new ClawChefError(`openclaw.root.assets must be a directory: ${resolvedAssets.value}`);
+      }
+
+      const assetFiles = await collectLocalAssetFiles(resolvedAssets.value);
+      for (const assetFile of assetFiles) {
+        const target = path.resolve(openclawRootPath, assetFile.relativePath);
+        if (!options.dryRun) {
+          await mkdir(path.dirname(target), { recursive: true });
+          await copyFile(assetFile.absolutePath, target);
+        }
+        logger.info(`OpenClaw root asset copied: ${assetFile.relativePath}`);
+      }
+    }
+
+    for (const file of root.files ?? []) {
+      const target = path.resolve(openclawRootPath, file.path);
+      const targetDir = path.dirname(target);
+
+      if (!options.dryRun) {
+        await mkdir(targetDir, { recursive: true });
+        const alreadyExists = await exists(target);
+        if (alreadyExists && file.overwrite === false) {
+          logger.warn(`Skipping existing file: ${target}`);
+        } else if (file.content !== undefined) {
+          await writeFile(target, file.content, "utf8");
+        } else if (file.content_from) {
+          const rawContent = await readTextFromRef(recipeOrigin, file.content_from);
+          const content = renderTemplateString(rawContent, options.vars, options.allowMissing);
+          await writeFile(target, content, "utf8");
+        } else if (file.source) {
+          const resolved = resolveFileRef(recipeOrigin, file.source);
+          if (resolved.kind === "local") {
+            await copyFile(resolved.value, target);
+          } else {
+            const content = await readBinaryFromRef(recipeOrigin, file.source);
+            await writeFile(target, content);
+          }
+        }
+      }
+      logger.info(`OpenClaw root file materialized: ${file.path}`);
+    }
   }
 
   for (const ws of recipe.workspaces ?? []) {
@@ -375,8 +458,12 @@ export async function runRecipe(
     logger.info(`Preset messages sent: ${conv.workspace}/${conv.agent}`);
   }
 
-  await provider.startGateway(recipe.openclaw, options.dryRun);
-  logger.info("Gateway started");
+  await provider.startGateway(recipe.openclaw, options.gatewayMode, options.dryRun);
+  if (options.gatewayMode === "none") {
+    logger.info("Gateway start skipped by gateway mode: none");
+  } else {
+    logger.info(`Gateway started (${options.gatewayMode})`);
+  }
 
   for (const channel of recipe.channels ?? []) {
     const effectiveChannel = channel.agent?.trim() && !channel.account?.trim()

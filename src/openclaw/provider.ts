@@ -1,4 +1,4 @@
-import type { AgentDef, ChannelDef, ConversationDef, OpenClawSection, WorkspaceDef } from "../types.js";
+import type { AgentDef, ChannelDef, ConversationDef, GatewayMode, OpenClawSection, WorkspaceDef } from "../types.js";
 
 export type ResolvedWorkspaceDef = WorkspaceDef & { path: string };
 
@@ -15,7 +15,7 @@ export interface OpenClawProvider {
   ): Promise<EnsureVersionResult>;
   installPlugin(config: OpenClawSection, pluginSpec: string, dryRun: boolean): Promise<void>;
   factoryReset(config: OpenClawSection, dryRun: boolean): Promise<void>;
-  startGateway(config: OpenClawSection, dryRun: boolean): Promise<void>;
+  startGateway(config: OpenClawSection, mode: GatewayMode, dryRun: boolean): Promise<void>;
   createWorkspace(config: OpenClawSection, workspace: ResolvedWorkspaceDef, dryRun: boolean): Promise<void>;
   configureChannel(config: OpenClawSection, channel: ChannelDef, dryRun: boolean): Promise<void>;
   bindChannelAgent(config: OpenClawSection, channel: ChannelDef, agent: string, dryRun: boolean): Promise<void>;

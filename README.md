@@ -15,10 +15,11 @@ Recipe-driven OpenClaw environment orchestrator.
 - Supports scoped execution via `--scope full|files|workspace`.
 - `full` scope runs factory reset first (with confirmation prompt unless `-s/--silent` is used).
 - If `openclaw` is missing, auto-installs the recipe version and skips factory reset.
-- Starts OpenClaw gateway service after each recipe execution.
+- Starts OpenClaw gateway after each recipe execution based on `--gateway-mode`.
 - Creates workspaces and agents (default workspace path: `~/.openclaw/workspace-<workspace-name>`).
 - Supports workspace-level assets copy via `workspaces[].assets`.
 - Materializes files into target workspaces.
+- Supports OpenClaw root-level assets/files via `openclaw.root` (default root path: `~/.openclaw`).
 - Installs skills.
 - Supports plugin preinstall via `openclaw.plugins[]` and runtime `--plugin` flags.
 - Configures channels with `openclaw channels add`.
@@ -88,6 +89,14 @@ Skip reset confirmation prompt:
 
 ```bash
 clawchef cook recipes/sample.yaml -s
+```
+
+Control gateway startup mode:
+
+```bash
+clawchef cook recipes/sample.yaml --gateway-mode service
+clawchef cook recipes/sample.yaml --gateway-mode run
+clawchef cook recipes/sample.yaml --gateway-mode none
 ```
 
 Warning: `-s/--silent` suppresses the factory-reset confirmation and auto-chooses force reinstall on version mismatch.
@@ -204,6 +213,7 @@ await scaffold("./my-recipe-project", {
 - `plugins`: plugin npm specs to preinstall for this run (`string[]`)
 - `scope`: `full | files | workspace` (default: `full`)
 - `workspaceName`: required when `scope: "workspace"`
+- `gatewayMode`: `service | run | none` (default: `service`)
 - `provider`: `command | remote | mock`
 - `remote`: remote provider config (same fields as CLI remote flags)
 - `envFile`: custom env file path/URL; when set, default cwd `.env` loading is skipped
@@ -307,6 +317,8 @@ Supported operation values sent by clawchef:
 - `configure_channel`, `bind_channel_agent`, `login_channel`
 - `run_agent`
 
+For `start_gateway`, clawchef sends `{ mode: "service" | "run" }` in payload when gateway mode is enabled.
+
 For `run_agent`, clawchef expects `output` in response for assertions.
 
 `command` provider now defaults to the current OpenClaw CLI shape (`openclaw 2026.x`), including:
@@ -352,6 +364,7 @@ For `command` provider, default command templates are:
 - `install_plugin`: `${bin} plugins install ${plugin_spec_q}`
 - `factory_reset`: `${bin} reset --scope full --yes --non-interactive`
 - `start_gateway`: `${bin} gateway start`
+- `run_gateway`: `${bin} gateway run`
 - `bind_channel_agent`: built-in `openclaw config get/set bindings` upsert (override with `openclaw.commands.bind_channel_agent`)
 - `login_channel`: `${bin} channels login --channel ${channel_q}${account_arg}`
 - `create_workspace`: generated from `openclaw.bootstrap` (override with `openclaw.commands.create_workspace`)
@@ -426,9 +439,31 @@ workspaces:
     assets: "./meetingbot-assets"
 ```
 
+## OpenClaw root files
+
+- `openclaw.root.path` is optional.
+- If omitted, clawchef uses `~/.openclaw`.
+- `openclaw.root.assets` is optional and recursively copied into the root directory.
+- `openclaw.root.files[]` runs after assets copy, so explicit file entries can override copied assets.
+- `openclaw.root.assets` is resolved relative to the recipe file path (unless absolute path is given).
+- Direct URL recipes do not support `openclaw.root.assets` (assets must resolve to a local directory).
+- `openclaw.root` currently supports `command` and `mock` providers; `remote` provider is not supported.
+
+Example:
+
+```yaml
+openclaw:
+  version: "2026.2.9"
+  root:
+    assets: "./openclaw-root-assets"
+    files:
+      - path: "AGENTS.md"
+        content_from: "./snippets/agents-template.md"
+```
+
 ## File content references
 
-In `workspaces[].files[]`, set exactly one of:
+In `workspaces[].files[]` and `openclaw.root.files[]`, set exactly one of:
 
 - `content`: inline text in recipe
 - `content_from`: load text from another file/URL (loaded content supports `${var}` template rendering)

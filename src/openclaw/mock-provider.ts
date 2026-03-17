@@ -1,4 +1,4 @@
-import type { AgentDef, ChannelDef, ConversationDef, OpenClawSection } from "../types.js";
+import type { AgentDef, ChannelDef, ConversationDef, GatewayMode, OpenClawSection } from "../types.js";
 import type { EnsureVersionResult, OpenClawProvider, ResolvedWorkspaceDef } from "./provider.js";
 
 interface MockState {
@@ -57,7 +57,7 @@ export class MockOpenClawProvider implements OpenClawProvider {
     this.state.messages.clear();
   }
 
-  async startGateway(_config: OpenClawSection, _dryRun: boolean): Promise<void> {
+  async startGateway(_config: OpenClawSection, _mode: GatewayMode, _dryRun: boolean): Promise<void> {
     return;
   }
 

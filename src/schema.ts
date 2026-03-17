@@ -14,6 +14,7 @@ const openClawCommandsSchema = z
     install_plugin: z.string().optional(),
     factory_reset: z.string().optional(),
     start_gateway: z.string().optional(),
+    run_gateway: z.string().optional(),
     enable_plugin: z.string().optional(),
     bind_channel_agent: z.string().optional(),
     login_channel: z.string().optional(),
@@ -49,12 +50,34 @@ const openClawBootstrapSchema = z
   })
   .strict();
 
+const rootFileSchema = z
+  .object({
+    path: z.string().min(1),
+    content: z.string().optional(),
+    content_from: z.string().min(1).optional(),
+    source: z.string().optional(),
+    overwrite: z.boolean().optional(),
+  })
+  .strict()
+  .refine((v) => [v.content, v.content_from, v.source].filter((item) => item !== undefined).length === 1, {
+    message: "openclaw.root.files[] requires exactly one of content, content_from, or source",
+  });
+
+const openClawRootSchema = z
+  .object({
+    path: z.string().min(1).optional(),
+    assets: z.string().min(1).optional(),
+    files: z.array(rootFileSchema).optional(),
+  })
+  .strict();
+
 const openClawSchema = z
   .object({
     bin: z.string().optional(),
     version: z.string(),
     install: z.enum(["auto", "always", "never"]).optional(),
     plugins: z.array(z.string().min(1)).optional(),
+    root: openClawRootSchema.optional(),
     bootstrap: openClawBootstrapSchema.optional(),
     commands: openClawCommandsSchema.optional(),
   })

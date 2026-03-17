@@ -1,6 +1,7 @@
 export type InstallPolicy = "auto" | "always" | "never";
 export type OpenClawProvider = "command" | "mock" | "remote";
 export type RunScope = "full" | "files" | "workspace";
+export type GatewayMode = "service" | "run" | "none";
 
 export interface OpenClawRemoteConfig {
   base_url: string;
@@ -24,6 +25,7 @@ export interface OpenClawCommandOverrides {
   install_plugin?: string;
   factory_reset?: string;
   start_gateway?: string;
+  run_gateway?: string;
   enable_plugin?: string;
   bind_channel_agent?: string;
   login_channel?: string;
@@ -61,8 +63,15 @@ export interface OpenClawSection {
   version: string;
   install?: InstallPolicy;
   plugins?: string[];
+  root?: OpenClawRootDef;
   bootstrap?: OpenClawBootstrap;
   commands?: OpenClawCommandOverrides;
+}
+
+export interface OpenClawRootDef {
+  path?: string;
+  assets?: string;
+  files?: WorkspaceFileDef[];
 }
 
 export interface WorkspaceDef {
@@ -143,6 +152,7 @@ export interface RunOptions {
   plugins: string[];
   scope: RunScope;
   workspaceName?: string;
+  gatewayMode: GatewayMode;
   dryRun: boolean;
   allowMissing: boolean;
   verbose: boolean;
