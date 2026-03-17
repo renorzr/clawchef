@@ -252,6 +252,12 @@ function semanticValidate(recipe: Recipe): void {
       );
     }
 
+    if (channel.group_policy !== undefined && channel.channel !== "telegram") {
+      throw new ClawChefError(
+        `channels[] entry for ${channel.channel} does not support group_policy. Use channel: telegram.`,
+      );
+    }
+
     if (channel.agent?.trim()) {
       if (channel.channel !== "telegram") {
         throw new ClawChefError(

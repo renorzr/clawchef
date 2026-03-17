@@ -85,6 +85,7 @@ export interface ChannelDef {
   channel: string;
   account?: string;
   agent?: string;
+  group_policy?: "open" | "allowlist" | "disabled";
   login?: boolean;
   login_mode?: "interactive";
   login_account?: string;

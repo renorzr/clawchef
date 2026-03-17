@@ -112,6 +112,7 @@ const channelSchema = z
     channel: z.string().min(1),
     account: z.string().min(1).optional(),
     agent: z.string().min(1).optional(),
+    group_policy: z.enum(["open", "allowlist", "disabled"]).optional(),
     login: z.boolean().optional(),
     login_mode: z.enum(["interactive"]).optional(),
     login_account: z.string().min(1).optional(),

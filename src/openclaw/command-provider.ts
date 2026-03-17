@@ -1,4 +1,4 @@
-import { tmpdir } from "node:os";
+import { homedir, tmpdir } from "node:os";
 import path from "node:path";
 import process from "node:process";
 import { mkdtemp, rm, writeFile } from "node:fs/promises";
@@ -176,6 +176,14 @@ function commandFor(config: OpenClawSection, key: CommandKey, vars: Record<strin
 function parseVersionOutput(output: string): string {
   const match = output.match(/\b(\d+\.\d+\.\d+)\b/);
   return match?.[1] ?? output.trim();
+}
+
+function telegramGroupPolicyPath(account: string | undefined): string {
+  const trimmed = account?.trim();
+  if (!trimmed) {
+    return "channels.telegram.groupPolicy";
+  }
+  return `channels.telegram.accounts[${trimmed}].groupPolicy`;
 }
 
 type VersionMismatchChoice = "ignore" | "abort" | "force";
@@ -440,10 +448,14 @@ export class CommandOpenClawProvider implements OpenClawProvider {
   async factoryReset(config: OpenClawSection, dryRun: boolean): Promise<void> {
     const bin = config.bin ?? "openclaw";
     const resetCmd = commandFor(config, "factory_reset", { bin, version: config.version });
-    if (!resetCmd.trim()) {
-      return;
+    if (resetCmd.trim()) {
+      await runShell(resetCmd, dryRun);
     }
-    await runShell(resetCmd, dryRun);
+
+    const openclawHome = path.join(homedir(), ".openclaw");
+    if (!dryRun) {
+      await rm(openclawHome, { recursive: true, force: true });
+    }
   }
 
   async installPlugin(config: OpenClawSection, pluginSpec: string, dryRun: boolean): Promise<void> {
@@ -554,6 +566,13 @@ export class CommandOpenClawProvider implements OpenClawProvider {
 
     const cmd = `${bin} channels add ${flags.join(" ")}`;
     await runShell(cmd, dryRun);
+
+    if (channel.channel === "telegram" && channel.group_policy) {
+      const configPath = telegramGroupPolicyPath(channel.account);
+      const policyValue = JSON.stringify(channel.group_policy);
+      const setPolicyCmd = `${bin} config set ${shellQuote(configPath)} ${shellQuote(policyValue)} --strict-json`;
+      await runShell(setPolicyCmd, dryRun);
+    }
   }
 
   async bindChannelAgent(config: OpenClawSection, channel: ChannelDef, agent: string, dryRun: boolean): Promise<void> {

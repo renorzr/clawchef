@@ -14,6 +14,7 @@ Recipe-driven OpenClaw environment orchestrator.
 - When installed OpenClaw version mismatches recipe version, prompts: ignore / abort / force reinstall (silent mode auto-picks force reinstall).
 - Supports scoped execution via `--scope full|files|workspace`.
 - `full` scope runs factory reset first (with confirmation prompt unless `-s/--silent` is used).
+- Factory reset includes removing local `~/.openclaw` directory.
 - If `openclaw` is missing, auto-installs the recipe version and skips factory reset.
 - Starts OpenClaw gateway after each recipe execution based on `--gateway-mode`.
 - Creates workspaces and agents (default workspace path: `~/.openclaw/workspace-<workspace-name>`).
@@ -392,6 +393,7 @@ channels:
     token: "${telegram_bot_token}"
     account: "default"
     agent: "main"
+    group_policy: "allowlist"
 
   - channel: "telegram"
     token: "${alerts_bot_token}"
@@ -412,11 +414,12 @@ channels:
 Supported common fields:
 
 - required: `channel`
-- optional: `account`, `agent`, `name`, `token`, `token_file`, `use_env`, `bot_token`, `access_token`, `app_token`, `webhook_url`, `webhook_path`, `signal_number`, `password`, `login`, `login_mode`, `login_account`
+- optional: `account`, `agent`, `group_policy`, `name`, `token`, `token_file`, `use_env`, `bot_token`, `access_token`, `app_token`, `webhook_url`, `webhook_path`, `signal_number`, `password`, `login`, `login_mode`, `login_account`
 - advanced passthrough: `extra_flags` (`snake_case` keys become `--kebab-case` CLI flags)
 
 `channels[].agent` currently supports `channel: "telegram"` only.
 If `agent` is set and `account` is omitted, clawchef defaults `account` to the same value as `agent`.
+`channels[].group_policy` currently supports `channel: "telegram"` only and is applied after `channels add` via `openclaw config set` so it is not overwritten by add-flow writes.
 
 ## Workspace path behavior
 
