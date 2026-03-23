@@ -8,7 +8,7 @@ import { validateReply } from "./assertions.js";
 import { ClawChefError } from "./errors.js";
 import { Logger } from "./logger.js";
 import { createProvider } from "./openclaw/factory.js";
-import type { Recipe, RunOptions } from "./types.js";
+import type { ChannelDef, Recipe, RunOptions } from "./types.js";
 import type { RecipeOrigin } from "./recipe.js";
 
 async function exists(filePath: string): Promise<boolean> {
@@ -82,6 +82,15 @@ function isHttpUrl(value: string): boolean {
   } catch {
     return false;
   }
+}
+
+function shouldAutoDisableTelegramChannel(channel: ChannelDef): boolean {
+  if (channel.channel !== "telegram") {
+    return false;
+  }
+  const emptyToken = channel.token !== undefined && channel.token.trim().length === 0;
+  const emptyBotToken = channel.bot_token !== undefined && channel.bot_token.trim().length === 0;
+  return emptyToken || emptyBotToken;
 }
 
 function isNotFoundError(err: unknown): boolean {
@@ -362,8 +371,16 @@ export async function runRecipe(
     const effectiveChannel = channel.agent?.trim() && !channel.account?.trim()
       ? { ...channel, account: channel.agent.trim() }
       : channel;
+    const autoDisabledTelegram = shouldAutoDisableTelegramChannel(effectiveChannel);
 
     await provider.configureChannel(recipe.openclaw, effectiveChannel, options.dryRun);
+    if (autoDisabledTelegram) {
+      logger.info(
+        `Telegram channel disabled due to empty bot token: ${effectiveChannel.channel}${effectiveChannel.account ? `/${effectiveChannel.account}` : ""}`,
+      );
+      continue;
+    }
+
     logger.info(`Channel configured: ${effectiveChannel.channel}${effectiveChannel.account ? `/${effectiveChannel.account}` : ""}`);
     if (effectiveChannel.agent?.trim()) {
       await provider.bindChannelAgent(recipe.openclaw, effectiveChannel, effectiveChannel.agent, options.dryRun);

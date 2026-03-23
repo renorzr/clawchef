@@ -420,6 +420,7 @@ Supported common fields:
 `channels[].agent` currently supports `channel: "telegram"` only.
 If `agent` is set and `account` is omitted, clawchef defaults `account` to the same value as `agent`.
 `channels[].group_policy` currently supports `channel: "telegram"` only and is applied after `channels add` via `openclaw config set` so it is not overwritten by add-flow writes.
+If `channel: "telegram"` has `token: ""` or `bot_token: ""`, clawchef auto-disables that telegram account (`enabled=false`) and skips channel add/bind.
 
 ## Workspace path behavior
 

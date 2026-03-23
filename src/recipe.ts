@@ -7,7 +7,7 @@ import YAML from "js-yaml";
 import { recipeSchema } from "./schema.js";
 import { ClawChefError } from "./errors.js";
 import { deepResolveTemplates } from "./template.js";
-import type { Recipe, RunOptions } from "./types.js";
+import type { ChannelDef, Recipe, RunOptions } from "./types.js";
 
 export type RecipeOrigin =
   | {
@@ -72,6 +72,15 @@ const ALLOWED_CHANNELS = new Set([
 const CHANNEL_SECRET_FIELDS = ["token", "bot_token", "access_token", "app_token", "password"] as const;
 
 const TEMPLATE_TOKEN_RE = /\$\{[A-Za-z_][A-Za-z0-9_]*\}/;
+
+function hasExplicitEmptyTelegramToken(channel: ChannelDef): boolean {
+  if (channel.channel !== "telegram") {
+    return false;
+  }
+  const emptyToken = channel.token !== undefined && channel.token.trim().length === 0;
+  const emptyBotToken = channel.bot_token !== undefined && channel.bot_token.trim().length === 0;
+  return emptyToken || emptyBotToken;
+}
 
 function assertNoInlineSecrets(recipe: Recipe): void {
   const bootstrap = recipe.openclaw.bootstrap;
@@ -290,6 +299,10 @@ function semanticValidate(recipe: Recipe): void {
         }
         return /(token|password|secret|api[_-]?key|webhook)/i.test(key) && String(value).trim().length > 0;
       });
+
+    if (hasExplicitEmptyTelegramToken(channel)) {
+      continue;
+    }
 
     if (!hasAuth) {
       throw new ClawChefError(

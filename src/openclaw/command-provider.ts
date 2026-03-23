@@ -186,6 +186,23 @@ function telegramGroupPolicyPath(account: string | undefined): string {
   return `channels.telegram.accounts[${trimmed}].groupPolicy`;
 }
 
+function telegramEnabledPath(account: string | undefined): string {
+  const trimmed = account?.trim();
+  if (!trimmed) {
+    return "channels.telegram.enabled";
+  }
+  return `channels.telegram.accounts[${trimmed}].enabled`;
+}
+
+function shouldAutoDisableTelegramChannel(channel: ChannelDef): boolean {
+  if (channel.channel !== "telegram") {
+    return false;
+  }
+  const emptyToken = channel.token !== undefined && channel.token.trim().length === 0;
+  const emptyBotToken = channel.bot_token !== undefined && channel.bot_token.trim().length === 0;
+  return emptyToken || emptyBotToken;
+}
+
 type VersionMismatchChoice = "ignore" | "abort" | "force";
 
 async function chooseVersionMismatchAction(
@@ -510,6 +527,14 @@ export class CommandOpenClawProvider implements OpenClawProvider {
 
   async configureChannel(config: OpenClawSection, channel: ChannelDef, dryRun: boolean): Promise<void> {
     const bin = config.bin ?? "openclaw";
+
+    if (shouldAutoDisableTelegramChannel(channel)) {
+      const enabledPath = telegramEnabledPath(channel.account);
+      const disableCmd = `${bin} config set ${shellQuote(enabledPath)} false --strict-json`;
+      await runShell(disableCmd, dryRun);
+      return;
+    }
+
     const enablePluginTemplate = config.commands?.enable_plugin;
     if (enablePluginTemplate?.trim()) {
       const enablePluginCmd = fillTemplate(enablePluginTemplate, {
