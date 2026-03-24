@@ -12,6 +12,7 @@ import type { ScaffoldOptions, ScaffoldResult } from "./scaffold.js";
 export interface CookOptions {
   vars?: Record<string, string>;
   plugins?: string[];
+  filePatterns?: string[];
   dryRun?: boolean;
   allowMissing?: boolean;
   verbose?: boolean;
@@ -27,6 +28,9 @@ export interface CookOptions {
 
 function normalizeCookOptions(options: CookOptions): RunOptions {
   const plugins = Array.from(new Set((options.plugins ?? []).map((value) => value.trim()).filter((value) => value.length > 0)));
+  const filePatterns = Array.from(
+    new Set((options.filePatterns ?? []).map((value) => value.trim()).filter((value) => value.length > 0)),
+  );
   const scope = options.scope ?? "full";
   const workspaceName = options.workspaceName?.trim() || undefined;
   if (scope === "workspace" && !workspaceName) {
@@ -35,9 +39,13 @@ function normalizeCookOptions(options: CookOptions): RunOptions {
   if (scope !== "workspace" && workspaceName) {
     throw new ClawChefError("workspaceName is only allowed when scope=workspace");
   }
+  if (scope !== "files" && filePatterns.length > 0) {
+    throw new ClawChefError("filePatterns is only allowed when scope=files");
+  }
   return {
     vars: options.vars ?? {},
     plugins,
+    filePatterns,
     scope,
     workspaceName,
     gatewayMode: options.gatewayMode ?? "service",

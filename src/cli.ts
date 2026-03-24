@@ -45,6 +45,10 @@ function parsePluginFlags(values: string[]): string[] {
   return Array.from(new Set(values.map((value) => value.trim()).filter((value) => value.length > 0)));
 }
 
+function parseFileFlags(values: string[]): string[] {
+  return Array.from(new Set(values.map((value) => value.trim()).filter((value) => value.length > 0)));
+}
+
 function readEnv(name: string): string | undefined {
   const value = process.env[name];
   if (value === undefined) {
@@ -62,10 +66,10 @@ function parseProvider(value: string): "command" | "mock" | "remote" {
 }
 
 function parseScope(value: string): RunScope {
-  if (value === "full" || value === "files" || value === "workspace") {
+  if (value === "full" || value === "stateful" || value === "files" || value === "workspace") {
     return value;
   }
-  throw new ClawChefError(`Invalid --scope value: ${value}. Expected full, files, or workspace`);
+  throw new ClawChefError(`Invalid --scope value: ${value}. Expected full, stateful, files, or workspace`);
 }
 
 function parseGatewayMode(value: string): GatewayMode {
@@ -117,7 +121,8 @@ export function buildCli(): Command {
     .option("--allow-missing", "Allow unresolved template variables", false)
     .option("--verbose", "Verbose logging", false)
     .option("-s, --silent", "Skip reset confirmation prompt", false)
-    .option("--scope <scope>", "Run scope: full | files | workspace", "full")
+    .option("--scope <scope>", "Run scope: full | stateful | files | workspace", "full")
+    .option("--file <pattern>", "File pattern filter (only with --scope files, repeatable)", (v, p: string[]) => p.concat([v]), [])
     .option("--workspace <name>", "Workspace name (required when --scope workspace)")
     .option("--gateway-mode <mode>", "Gateway mode: service | run | none", "service")
     .option("--dotenv-ref <path-or-url>", "Load env vars from local file or HTTP URL")
@@ -139,6 +144,7 @@ export function buildCli(): Command {
       const provider = parseProvider(opts.provider ?? readEnv("CLAWCHEF_PROVIDER") ?? "command");
       const scope = parseScope(String(opts.scope ?? "full"));
       const gatewayMode = parseGatewayMode(String(opts.gatewayMode ?? "service"));
+      const filePatterns = parseFileFlags(opts.file);
       const workspaceName = opts.workspace?.trim() ? String(opts.workspace).trim() : undefined;
       if (scope === "workspace" && !workspaceName) {
         throw new ClawChefError("--scope workspace requires --workspace <name>");
@@ -146,9 +152,13 @@ export function buildCli(): Command {
       if (scope !== "workspace" && workspaceName) {
         throw new ClawChefError("--workspace is only allowed when --scope workspace");
       }
+      if (scope !== "files" && filePatterns.length > 0) {
+        throw new ClawChefError("--file is only allowed when --scope files");
+      }
       const options: RunOptions = {
         vars: parseVarFlags(opts.var),
         plugins: parsePluginFlags(opts.plugin),
+        filePatterns,
         scope,
         workspaceName,
         gatewayMode,

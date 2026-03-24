@@ -171,6 +171,21 @@ function collectVars(recipe: Recipe, cliVars: Record<string, string>, requiredKe
 }
 
 function projectRecipeForScope(recipe: Recipe, options: RunOptions): Recipe {
+  if (options.scope === "files") {
+    return {
+      ...recipe,
+      openclaw: {
+        ...recipe.openclaw,
+        version: "0.0.0",
+        bootstrap: undefined,
+        plugins: [],
+      },
+      channels: [],
+      agents: [],
+      conversations: [],
+    };
+  }
+
   if (options.scope !== "workspace") {
     return recipe;
   }
@@ -832,7 +847,7 @@ export async function loadRecipe(recipePath: string, options: RunOptions): Promi
 
     assertNoInlineSecrets(projected);
 
-    const requiredKeys = options.scope === "workspace" ? new Set<string>() : undefined;
+    const requiredKeys = options.scope === "workspace" || options.scope === "files" ? new Set<string>() : undefined;
     const vars = collectVars(projected, options.vars, requiredKeys);
     const rendered = deepResolveTemplates(projected, vars, options.allowMissing);
     const secondParse = recipeSchema.safeParse(rendered);

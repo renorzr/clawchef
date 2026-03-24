@@ -27,6 +27,34 @@ function truncateForLog(text: string, maxLength = 500): string {
   return `${text.slice(0, maxLength)}... [truncated ${text.length - maxLength} chars]`;
 }
 
+function toPosixPath(value: string): string {
+  return value.replaceAll("\\", "/");
+}
+
+function wildcardToRegExp(pattern: string): RegExp {
+  const escaped = toPosixPath(pattern)
+    .replace(/[.+^${}()|[\]\\]/g, "\\$&")
+    .replace(/\*\*/g, "___DOUBLE_STAR___")
+    .replace(/\*/g, "[^/]*")
+    .replace(/___DOUBLE_STAR___/g, ".*");
+  return new RegExp(`^${escaped}$`);
+}
+
+function matchesFilePatterns(patterns: string[], relativePath: string): boolean {
+  if (patterns.length === 0) {
+    return true;
+  }
+  const normalized = toPosixPath(relativePath);
+  return patterns.some((pattern) => wildcardToRegExp(pattern).test(normalized));
+}
+
+function matchesAnyFilePattern(patterns: string[], candidates: string[]): boolean {
+  if (patterns.length === 0) {
+    return true;
+  }
+  return candidates.some((candidate) => matchesFilePatterns(patterns, candidate));
+}
+
 function renderTemplateString(input: string, vars: Record<string, string>, allowMissing: boolean): string {
   return input.replace(/\$\{([^}]+)\}/g, (_match, rawKey: string) => {
     const key = String(rawKey).trim();
@@ -191,36 +219,42 @@ export async function runRecipe(
 ): Promise<void> {
   const provider = createProvider(options);
   const remoteMode = options.provider === "remote";
+  const filesOnlyScope = options.scope === "files";
+  const fileFilterEnabled = filesOnlyScope && options.filePatterns.length > 0;
   const workspacePaths = new Map<string, string>();
   const preserveExistingState = options.scope !== "full";
 
   logger.info(`Running recipe: ${recipe.name}`);
-  const versionResult = await provider.ensureVersion(
-    recipe.openclaw,
-    options.dryRun,
-    options.silent,
-    preserveExistingState,
-  );
-  logger.info(`OpenClaw version ready: ${recipe.openclaw.version}`);
+  if (!filesOnlyScope) {
+    const versionResult = await provider.ensureVersion(
+      recipe.openclaw,
+      options.dryRun,
+      options.silent,
+      preserveExistingState,
+    );
+    logger.info(`OpenClaw version ready: ${recipe.openclaw.version}`);
 
-  if (versionResult.installedThisRun) {
-    logger.info("OpenClaw was installed in this run; skipping factory reset");
-  } else if (preserveExistingState) {
-    logger.info("Keeping existing OpenClaw state; skipping factory reset");
-  } else {
-    const confirmed = await confirmFactoryReset(options);
-    if (!confirmed) {
-      throw new ClawChefError("Aborted by user before factory reset");
+    if (versionResult.installedThisRun) {
+      logger.info("OpenClaw was installed in this run; skipping factory reset");
+    } else if (preserveExistingState) {
+      logger.info("Keeping existing OpenClaw state; skipping factory reset");
+    } else {
+      const confirmed = await confirmFactoryReset(options);
+      if (!confirmed) {
+        throw new ClawChefError("Aborted by user before factory reset");
+      }
+      await provider.factoryReset(recipe.openclaw, options.dryRun);
+      logger.info("Factory reset completed");
     }
-    await provider.factoryReset(recipe.openclaw, options.dryRun);
-    logger.info("Factory reset completed");
-  }
 
-  const pluginSpecs = Array.from(new Set([...(recipe.openclaw.plugins ?? []), ...options.plugins].map((v) => v.trim())))
-    .filter((v) => v.length > 0);
-  for (const pluginSpec of pluginSpecs) {
-    await provider.installPlugin(recipe.openclaw, pluginSpec, options.dryRun);
-    logger.info(`Plugin preinstalled: ${pluginSpec}`);
+    const pluginSpecs = Array.from(new Set([...(recipe.openclaw.plugins ?? []), ...options.plugins].map((v) => v.trim())))
+      .filter((v) => v.length > 0);
+    for (const pluginSpec of pluginSpecs) {
+      await provider.installPlugin(recipe.openclaw, pluginSpec, options.dryRun);
+      logger.info(`Plugin preinstalled: ${pluginSpec}`);
+    }
+  } else {
+    logger.info("Scope files: only syncing root/workspace assets and files");
   }
 
   const root = recipe.openclaw.root;
@@ -261,6 +295,11 @@ export async function runRecipe(
       } else {
         const assetFiles = await collectLocalAssetFiles(resolvedAssets.value);
         for (const assetFile of assetFiles) {
+          const patternCandidates = [assetFile.relativePath, `root/${assetFile.relativePath}`];
+          if (fileFilterEnabled && !matchesAnyFilePattern(options.filePatterns, patternCandidates)) {
+            logger.debug(`Filtered root asset: ${assetFile.relativePath}`);
+            continue;
+          }
           const target = path.resolve(openclawRootPath, assetFile.relativePath);
           if (!options.dryRun) {
             await mkdir(path.dirname(target), { recursive: true });
@@ -272,6 +311,11 @@ export async function runRecipe(
     }
 
     for (const file of root.files ?? []) {
+      const patternCandidates = [file.path, `root/${file.path}`];
+      if (fileFilterEnabled && !matchesAnyFilePattern(options.filePatterns, patternCandidates)) {
+        logger.debug(`Filtered root file: ${file.path}`);
+        continue;
+      }
       const target = path.resolve(openclawRootPath, file.path);
       const targetDir = path.dirname(target);
 
@@ -306,8 +350,10 @@ export async function runRecipe(
     if (!options.dryRun && !remoteMode) {
       await mkdir(absPath, { recursive: true });
     }
-    await provider.createWorkspace(recipe.openclaw, { ...ws, path: absPath }, options.dryRun);
-    logger.info(`Workspace created: ${ws.name}`);
+    if (!filesOnlyScope) {
+      await provider.createWorkspace(recipe.openclaw, { ...ws, path: absPath }, options.dryRun);
+      logger.info(`Workspace created: ${ws.name}`);
+    }
 
     if (!ws.assets?.trim()) {
       continue;
@@ -337,6 +383,15 @@ export async function runRecipe(
 
     const assetFiles = await collectLocalAssetFiles(resolvedAssets.value);
     for (const assetFile of assetFiles) {
+      const patternCandidates = [
+        assetFile.relativePath,
+        `${ws.name}/${assetFile.relativePath}`,
+        `workspace-${ws.name}/${assetFile.relativePath}`,
+      ];
+      if (fileFilterEnabled && !matchesAnyFilePattern(options.filePatterns, patternCandidates)) {
+        logger.debug(`Filtered workspace asset: ${ws.name}/${assetFile.relativePath}`);
+        continue;
+      }
       if (provider.materializeFile) {
         const content = await readFile(assetFile.absolutePath, "utf8");
         await provider.materializeFile(
@@ -358,35 +413,37 @@ export async function runRecipe(
     }
   }
 
-  for (const agent of recipe.agents ?? []) {
-    const workspacePath = workspacePaths.get(agent.workspace);
-    if (!workspacePath) {
-      throw new ClawChefError(`Agent references missing workspace: ${agent.workspace}`);
-    }
-    await provider.createAgent(recipe.openclaw, agent, workspacePath, options.dryRun);
-    logger.info(`Agent created: ${agent.workspace}/${agent.name}`);
-  }
-
-  for (const channel of recipe.channels ?? []) {
-    const effectiveChannel = channel.agent?.trim() && !channel.account?.trim()
-      ? { ...channel, account: channel.agent.trim() }
-      : channel;
-    const autoDisabledTelegram = shouldAutoDisableTelegramChannel(effectiveChannel);
-
-    await provider.configureChannel(recipe.openclaw, effectiveChannel, options.dryRun);
-    if (autoDisabledTelegram) {
-      logger.info(
-        `Telegram channel disabled due to empty bot token: ${effectiveChannel.channel}${effectiveChannel.account ? `/${effectiveChannel.account}` : ""}`,
-      );
-      continue;
+  if (!filesOnlyScope) {
+    for (const agent of recipe.agents ?? []) {
+      const workspacePath = workspacePaths.get(agent.workspace);
+      if (!workspacePath) {
+        throw new ClawChefError(`Agent references missing workspace: ${agent.workspace}`);
+      }
+      await provider.createAgent(recipe.openclaw, agent, workspacePath, options.dryRun);
+      logger.info(`Agent created: ${agent.workspace}/${agent.name}`);
     }
 
-    logger.info(`Channel configured: ${effectiveChannel.channel}${effectiveChannel.account ? `/${effectiveChannel.account}` : ""}`);
-    if (effectiveChannel.agent?.trim()) {
-      await provider.bindChannelAgent(recipe.openclaw, effectiveChannel, effectiveChannel.agent, options.dryRun);
-      logger.info(
-        `Channel bound to agent: ${effectiveChannel.channel}${effectiveChannel.account ? `/${effectiveChannel.account}` : ""} -> ${effectiveChannel.agent}`,
-      );
+    for (const channel of recipe.channels ?? []) {
+      const effectiveChannel = channel.agent?.trim() && !channel.account?.trim()
+        ? { ...channel, account: channel.agent.trim() }
+        : channel;
+      const autoDisabledTelegram = shouldAutoDisableTelegramChannel(effectiveChannel);
+
+      await provider.configureChannel(recipe.openclaw, effectiveChannel, options.dryRun);
+      if (autoDisabledTelegram) {
+        logger.info(
+          `Telegram channel disabled due to empty bot token: ${effectiveChannel.channel}${effectiveChannel.account ? `/${effectiveChannel.account}` : ""}`,
+        );
+        continue;
+      }
+
+      logger.info(`Channel configured: ${effectiveChannel.channel}${effectiveChannel.account ? `/${effectiveChannel.account}` : ""}`);
+      if (effectiveChannel.agent?.trim()) {
+        await provider.bindChannelAgent(recipe.openclaw, effectiveChannel, effectiveChannel.agent, options.dryRun);
+        logger.info(
+          `Channel bound to agent: ${effectiveChannel.channel}${effectiveChannel.account ? `/${effectiveChannel.account}` : ""} -> ${effectiveChannel.agent}`,
+        );
+      }
     }
   }
 
@@ -397,6 +454,15 @@ export async function runRecipe(
     }
 
     for (const file of workspace.files ?? []) {
+      const patternCandidates = [
+        file.path,
+        `${workspace.name}/${file.path}`,
+        `workspace-${workspace.name}/${file.path}`,
+      ];
+      if (fileFilterEnabled && !matchesAnyFilePattern(options.filePatterns, patternCandidates)) {
+        logger.debug(`Filtered workspace file: ${workspace.name}/${file.path}`);
+        continue;
+      }
       if (provider.materializeFile) {
         let content = file.content;
         if (content === undefined && file.content_from) {
@@ -453,64 +519,66 @@ export async function runRecipe(
     }
   }
 
-  for (const agent of recipe.agents ?? []) {
-    for (const skill of agent.skills ?? []) {
-      await provider.installSkill(recipe.openclaw, agent.workspace, agent.name, skill, options.dryRun);
-      logger.info(`Skill installed: ${agent.workspace}/${agent.name} -> ${skill}`);
-    }
-  }
-
-  for (const conv of recipe.conversations ?? []) {
-    for (const msg of conv.messages) {
-      await provider.sendMessage(recipe.openclaw, conv, msg.content, options.dryRun);
-
-      const shouldRun = conv.run ?? Boolean(msg.expect);
-      if (shouldRun) {
-        if (options.dryRun) {
-          logger.info(`dry-run: skipping execution and output assertions: ${conv.workspace}/${conv.agent}`);
-          continue;
-        }
-        const reply = await provider.runAgent(recipe.openclaw, conv, options.dryRun);
-        if (msg.expect) {
-          try {
-            validateReply(reply, msg.expect);
-            logger.info(`Output assertions passed: ${conv.workspace}/${conv.agent}`);
-          } catch (err) {
-            logger.warn(
-              `Assertion failed reply (truncated): ${truncateForLog(reply)}`,
-            );
-            throw err;
-          }
-        } else {
-          logger.info(`Agent executed: ${conv.workspace}/${conv.agent}`);
-        }
-        logger.debug(`Agent output: ${reply}`);
+  if (!filesOnlyScope) {
+    for (const agent of recipe.agents ?? []) {
+      for (const skill of agent.skills ?? []) {
+        await provider.installSkill(recipe.openclaw, agent.workspace, agent.name, skill, options.dryRun);
+        logger.info(`Skill installed: ${agent.workspace}/${agent.name} -> ${skill}`);
       }
     }
-    logger.info(`Preset messages sent: ${conv.workspace}/${conv.agent}`);
-  }
 
-  await provider.startGateway(recipe.openclaw, options.gatewayMode, options.dryRun);
-  if (options.gatewayMode === "none") {
-    logger.info("Gateway start skipped by gateway mode: none");
-  } else {
-    logger.info(`Gateway started (${options.gatewayMode})`);
-  }
+    for (const conv of recipe.conversations ?? []) {
+      for (const msg of conv.messages) {
+        await provider.sendMessage(recipe.openclaw, conv, msg.content, options.dryRun);
 
-  for (const channel of recipe.channels ?? []) {
-    const effectiveChannel = channel.agent?.trim() && !channel.account?.trim()
-      ? { ...channel, account: channel.agent.trim() }
-      : channel;
-    if (!effectiveChannel.login) {
-      continue;
+        const shouldRun = conv.run ?? Boolean(msg.expect);
+        if (shouldRun) {
+          if (options.dryRun) {
+            logger.info(`dry-run: skipping execution and output assertions: ${conv.workspace}/${conv.agent}`);
+            continue;
+          }
+          const reply = await provider.runAgent(recipe.openclaw, conv, options.dryRun);
+          if (msg.expect) {
+            try {
+              validateReply(reply, msg.expect);
+              logger.info(`Output assertions passed: ${conv.workspace}/${conv.agent}`);
+            } catch (err) {
+              logger.warn(
+                `Assertion failed reply (truncated): ${truncateForLog(reply)}`,
+              );
+              throw err;
+            }
+          } else {
+            logger.info(`Agent executed: ${conv.workspace}/${conv.agent}`);
+          }
+          logger.debug(`Agent output: ${reply}`);
+        }
+      }
+      logger.info(`Preset messages sent: ${conv.workspace}/${conv.agent}`);
     }
-    if (!options.dryRun && !input.isTTY) {
-      throw new ClawChefError(
-        `Channel login for ${effectiveChannel.channel} requires an interactive terminal session`,
-      );
+
+    await provider.startGateway(recipe.openclaw, options.gatewayMode, options.dryRun);
+    if (options.gatewayMode === "none") {
+      logger.info("Gateway start skipped by gateway mode: none");
+    } else {
+      logger.info(`Gateway started (${options.gatewayMode})`);
     }
-    await provider.loginChannel(recipe.openclaw, effectiveChannel, options.dryRun);
-    logger.info(`Channel login completed: ${effectiveChannel.channel}${effectiveChannel.account ? `/${effectiveChannel.account}` : ""}`);
+
+    for (const channel of recipe.channels ?? []) {
+      const effectiveChannel = channel.agent?.trim() && !channel.account?.trim()
+        ? { ...channel, account: channel.agent.trim() }
+        : channel;
+      if (!effectiveChannel.login) {
+        continue;
+      }
+      if (!options.dryRun && !input.isTTY) {
+        throw new ClawChefError(
+          `Channel login for ${effectiveChannel.channel} requires an interactive terminal session`,
+        );
+      }
+      await provider.loginChannel(recipe.openclaw, effectiveChannel, options.dryRun);
+      logger.info(`Channel login completed: ${effectiveChannel.channel}${effectiveChannel.account ? `/${effectiveChannel.account}` : ""}`);
+    }
   }
 
   logger.info("Recipe execution completed");

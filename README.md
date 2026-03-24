@@ -12,7 +12,7 @@ Recipe-driven OpenClaw environment orchestrator.
 - Requires secrets to be injected via `--var` / `CLAWCHEF_VAR_*` (no inline secrets in recipe).
 - Prepares OpenClaw version (install or reuse).
 - When installed OpenClaw version mismatches recipe version, prompts: ignore / abort / force reinstall (silent mode auto-picks force reinstall).
-- Supports scoped execution via `--scope full|files|workspace`.
+- Supports scoped execution via `--scope full|stateful|files|workspace`.
 - `full` scope runs factory reset first (with confirmation prompt unless `-s/--silent` is used).
 - Factory reset includes removing local `~/.openclaw` directory.
 - If `openclaw` is missing, auto-installs the recipe version and skips factory reset.
@@ -106,8 +106,29 @@ Use it only in CI/non-interactive flows where destructive reset behavior is expe
 Keep existing OpenClaw state (skip reset and keep current version on mismatch):
 
 ```bash
+clawchef cook recipes/sample.yaml --scope stateful
+```
+
+Sync only files and assets (`openclaw.root.assets/files` + `workspaces[].assets/files`) without touching version/reset/workspace/agent/channel/skills/conversations/gateway:
+
+```bash
 clawchef cook recipes/sample.yaml --scope files
 ```
+
+Limit files-scope changes to relative paths only:
+
+```bash
+clawchef cook recipes/sample.yaml --scope files --file "README.md"
+clawchef cook recipes/sample.yaml --scope files --file "src/**" --file "docs/*.md"
+clawchef cook recipes/sample.yaml --scope files --file "workspace-product-designer/**"
+```
+
+`--file` is repeatable and only works with `--scope files`. Patterns can match any of:
+
+- file relative path (for example `README.md`, `src/**`)
+- workspace-prefixed path (for example `product-designer/**`)
+- default workspace-dir-prefixed path (for example `workspace-product-designer/**`)
+- root-prefixed path (`root/**`) for `openclaw.root.assets/files`
 
 Update only one workspace:
 

@@ -1,6 +1,6 @@
 export type InstallPolicy = "auto" | "always" | "never";
 export type OpenClawProvider = "command" | "mock" | "remote";
-export type RunScope = "full" | "files" | "workspace";
+export type RunScope = "full" | "stateful" | "files" | "workspace";
 export type GatewayMode = "service" | "run" | "none";
 
 export interface OpenClawRemoteConfig {
@@ -151,6 +151,7 @@ export interface Recipe {
 export interface RunOptions {
   vars: Record<string, string>;
   plugins: string[];
+  filePatterns: string[];
   scope: RunScope;
   workspaceName?: string;
   gatewayMode: GatewayMode;
