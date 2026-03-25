@@ -434,7 +434,7 @@ export async function runRecipe(
       await provider.configureChannel(recipe.openclaw, effectiveChannel, options.dryRun);
       if (autoDisabledTelegram) {
         logger.info(
-          `Telegram channel disabled due to empty bot token: ${effectiveChannel.channel}${effectiveChannel.account ? `/${effectiveChannel.account}` : ""}`,
+          `Telegram channel skipped due to empty bot token: ${effectiveChannel.channel}${effectiveChannel.account ? `/${effectiveChannel.account}` : ""}`,
         );
         continue;
       }

@@ -220,14 +220,6 @@ function telegramGroupPolicyPath(account: string | undefined): string {
   return `channels.telegram.accounts[${trimmed}].groupPolicy`;
 }
 
-function telegramEnabledPath(account: string | undefined): string {
-  const trimmed = account?.trim();
-  if (!trimmed) {
-    return "channels.telegram.enabled";
-  }
-  return `channels.telegram.accounts[${trimmed}].enabled`;
-}
-
 function shouldAutoDisableTelegramChannel(channel: ChannelDef): boolean {
   if (channel.channel !== "telegram") {
     return false;
@@ -734,9 +726,9 @@ export class CommandOpenClawProvider implements OpenClawProvider {
     const cfgPath = configPath();
 
     if (shouldAutoDisableTelegramChannel(channel)) {
-      const openclawConfig = await loadConfigJson(cfgPath);
-      setConfigValue(openclawConfig, telegramEnabledPath(channel.account), false);
-      await saveConfigJson(cfgPath, openclawConfig, dryRun);
+      traceDebug(
+        `Skip telegram channel with empty token: ${channel.channel}${channel.account ? `/${channel.account}` : ""}`,
+      );
       return;
     }
 
