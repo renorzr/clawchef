@@ -6,6 +6,11 @@ export interface EnsureVersionResult {
   installedThisRun: boolean;
 }
 
+export interface ChannelAgentBinding {
+  channel: ChannelDef;
+  agent: string;
+}
+
 export interface OpenClawProvider {
   ensureVersion(
     config: OpenClawSection,
@@ -19,6 +24,7 @@ export interface OpenClawProvider {
   createWorkspace(config: OpenClawSection, workspace: ResolvedWorkspaceDef, dryRun: boolean): Promise<void>;
   configureChannel(config: OpenClawSection, channel: ChannelDef, dryRun: boolean): Promise<void>;
   applyConfigPatch(config: OpenClawSection, patch: Record<string, unknown>, dryRun: boolean): Promise<void>;
+  bindChannelAgents?(config: OpenClawSection, bindings: ChannelAgentBinding[], dryRun: boolean): Promise<void>;
   bindChannelAgent(config: OpenClawSection, channel: ChannelDef, agent: string, dryRun: boolean): Promise<void>;
   loginChannel(config: OpenClawSection, channel: ChannelDef, dryRun: boolean): Promise<void>;
   materializeFile?(

@@ -7,7 +7,7 @@ import { createInterface } from "node:readline/promises";
 import { stdin as input, stdout as output } from "node:process";
 import { ClawChefError } from "../errors.js";
 import type { AgentDef, ChannelDef, ConversationDef, GatewayMode, OpenClawBootstrap, OpenClawSection } from "../types.js";
-import type { EnsureVersionResult, OpenClawProvider, ResolvedWorkspaceDef } from "./provider.js";
+import type { ChannelAgentBinding, EnsureVersionResult, OpenClawProvider, ResolvedWorkspaceDef } from "./provider.js";
 
 const DEFAULT_COMMANDS = {
   use_version: "${bin} --version",
@@ -460,6 +460,7 @@ function parseBindingsJson(raw: string): BindingItem[] {
 
 export class CommandOpenClawProvider implements OpenClawProvider {
   private readonly stagedMessages = new Map<string, StagedMessage[]>();
+  private readonly enabledChannelPlugins = new Set<string>();
 
   constructor(verboseEnabled = false) {
     TRACE_VERBOSE = verboseEnabled;
@@ -644,7 +645,7 @@ export class CommandOpenClawProvider implements OpenClawProvider {
     }
 
     const enablePluginTemplate = config.commands?.enable_plugin;
-    if (enablePluginTemplate?.trim()) {
+    if (enablePluginTemplate?.trim() && !this.enabledChannelPlugins.has(channel.channel)) {
       const enablePluginCmd = fillTemplate(enablePluginTemplate, {
         bin,
         version: config.version,
@@ -654,6 +655,9 @@ export class CommandOpenClawProvider implements OpenClawProvider {
       if (enablePluginCmd.trim()) {
         await runShell(enablePluginCmd, dryRun);
       }
+      this.enabledChannelPlugins.add(channel.channel);
+    } else if (enablePluginTemplate?.trim()) {
+      traceDebug(`Skip plugin enable for channel=${channel.channel}; already enabled in this run`);
     }
 
     const flags: string[] = [
@@ -721,6 +725,55 @@ export class CommandOpenClawProvider implements OpenClawProvider {
     }
   }
 
+  async bindChannelAgents(config: OpenClawSection, bindingsInput: ChannelAgentBinding[], dryRun: boolean): Promise<void> {
+    if (bindingsInput.length === 0) {
+      return;
+    }
+
+    const bin = config.bin ?? "openclaw";
+    const customTemplate = config.commands?.bind_channel_agent;
+    if (customTemplate?.trim()) {
+      for (const binding of bindingsInput) {
+        await this.bindChannelAgent(config, binding.channel, binding.agent, dryRun);
+      }
+      return;
+    }
+
+    if (dryRun) {
+      return;
+    }
+
+    const getCmd = `${bin} config get bindings --json 2>/dev/null || printf '[]'`;
+    const rawBindings = await runShell(getCmd, false);
+    const bindings = parseBindingsJson(rawBindings);
+
+    for (const binding of bindingsInput) {
+      const account = binding.channel.account?.trim();
+      if (!account) {
+        throw new ClawChefError(`Channel ${binding.channel.channel} requires account for agent binding`);
+      }
+
+      const nextBinding: BindingItem = {
+        agentId: binding.agent,
+        match: {
+          channel: binding.channel.channel,
+          accountId: account,
+        },
+      };
+
+      const index = bindings.findIndex((item) => isAccountLevelBinding(item, binding.channel.channel, account));
+      if (index >= 0) {
+        bindings[index] = nextBinding;
+      } else {
+        bindings.push(nextBinding);
+      }
+    }
+
+    const json = JSON.stringify(bindings);
+    const setCmd = `${bin} config set bindings ${shellQuote(json)} --json`;
+    await runShell(setCmd, false);
+  }
+
   async bindChannelAgent(config: OpenClawSection, channel: ChannelDef, agent: string, dryRun: boolean): Promise<void> {
     const account = channel.account?.trim();
     if (!account) {
@@ -746,31 +799,7 @@ export class CommandOpenClawProvider implements OpenClawProvider {
       return;
     }
 
-    if (dryRun) {
-      return;
-    }
-
-    const getCmd = `${bin} config get bindings --json 2>/dev/null || printf '[]'`;
-    const rawBindings = await runShell(getCmd, false);
-    const bindings = parseBindingsJson(rawBindings);
-    const nextBinding: BindingItem = {
-      agentId: agent,
-      match: {
-        channel: channel.channel,
-        accountId: account,
-      },
-    };
-
-    const index = bindings.findIndex((item) => isAccountLevelBinding(item, channel.channel, account));
-    if (index >= 0) {
-      bindings[index] = nextBinding;
-    } else {
-      bindings.push(nextBinding);
-    }
-
-    const json = JSON.stringify(bindings);
-    const setCmd = `${bin} config set bindings ${shellQuote(json)} --json`;
-    await runShell(setCmd, false);
+    await this.bindChannelAgents(config, [{ channel, agent }], dryRun);
   }
 
   async loginChannel(config: OpenClawSection, channel: ChannelDef, dryRun: boolean): Promise<void> {

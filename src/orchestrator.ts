@@ -414,6 +414,8 @@ export async function runRecipe(
   }
 
   if (!filesOnlyScope) {
+    const pendingChannelBindings: Array<{ channel: ChannelDef; agent: string }> = [];
+
     for (const agent of recipe.agents ?? []) {
       const workspacePath = workspacePaths.get(agent.workspace);
       if (!workspacePath) {
@@ -439,9 +441,22 @@ export async function runRecipe(
 
       logger.info(`Channel configured: ${effectiveChannel.channel}${effectiveChannel.account ? `/${effectiveChannel.account}` : ""}`);
       if (effectiveChannel.agent?.trim()) {
-        await provider.bindChannelAgent(recipe.openclaw, effectiveChannel, effectiveChannel.agent, options.dryRun);
+        pendingChannelBindings.push({ channel: effectiveChannel, agent: effectiveChannel.agent });
+      }
+    }
+
+    if (pendingChannelBindings.length > 0) {
+      if (provider.bindChannelAgents) {
+        await provider.bindChannelAgents(recipe.openclaw, pendingChannelBindings, options.dryRun);
+      } else {
+        for (const binding of pendingChannelBindings) {
+          await provider.bindChannelAgent(recipe.openclaw, binding.channel, binding.agent, options.dryRun);
+        }
+      }
+
+      for (const binding of pendingChannelBindings) {
         logger.info(
-          `Channel bound to agent: ${effectiveChannel.channel}${effectiveChannel.account ? `/${effectiveChannel.account}` : ""} -> ${effectiveChannel.agent}`,
+          `Channel bound to agent: ${binding.channel.channel}${binding.channel.account ? `/${binding.channel.account}` : ""} -> ${binding.agent}`,
         );
       }
     }
