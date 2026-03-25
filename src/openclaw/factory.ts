@@ -10,7 +10,7 @@ export function createProvider(options: RunOptions): OpenClawProvider {
     return new MockOpenClawProvider();
   }
   if (provider === "remote") {
-    return new RemoteOpenClawProvider(options.remote);
+    return new RemoteOpenClawProvider(options.remote, options.verbose);
   }
-  return new CommandOpenClawProvider();
+  return new CommandOpenClawProvider(options.verbose);
 }

@@ -69,6 +69,10 @@ export class MockOpenClawProvider implements OpenClawProvider {
     this.state.channels.add(`${channel.channel}::${channel.account ?? "default"}`);
   }
 
+  async applyConfigPatch(_config: OpenClawSection, _patch: Record<string, unknown>, _dryRun: boolean): Promise<void> {
+    return;
+  }
+
   async bindChannelAgent(
     _config: OpenClawSection,
     _channel: ChannelDef,

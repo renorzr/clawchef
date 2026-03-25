@@ -29,6 +29,17 @@ interface RemoteOperationResponse {
 const DEFAULT_TIMEOUT_MS = 60_000;
 const DEFAULT_OPERATION_PATH = "/v1/clawchef/operation";
 
+function timestamp(): string {
+  const now = new Date();
+  const year = now.getFullYear();
+  const month = String(now.getMonth() + 1).padStart(2, "0");
+  const day = String(now.getDate()).padStart(2, "0");
+  const hours = String(now.getHours()).padStart(2, "0");
+  const minutes = String(now.getMinutes()).padStart(2, "0");
+  const seconds = String(now.getSeconds()).padStart(2, "0");
+  return `${year}-${month}-${day} ${hours}:${minutes}:${seconds}`;
+}
+
 function parseResponseBody(raw: string): RemoteOperationResponse {
   if (!raw.trim()) {
     return {};
@@ -84,9 +95,18 @@ function assertRemoteConfig(remote: Partial<OpenClawRemoteConfig>): OpenClawRemo
 export class RemoteOpenClawProvider implements OpenClawProvider {
   private readonly stagedMessages = new Map<string, StagedMessage[]>();
   private readonly remoteConfig: Partial<OpenClawRemoteConfig>;
+  private readonly verboseEnabled: boolean;
 
-  constructor(remoteConfig: Partial<OpenClawRemoteConfig>) {
+  constructor(remoteConfig: Partial<OpenClawRemoteConfig>, verboseEnabled = false) {
     this.remoteConfig = remoteConfig;
+    this.verboseEnabled = verboseEnabled;
+  }
+
+  private debug(message: string): void {
+    if (!this.verboseEnabled) {
+      return;
+    }
+    process.stdout.write(`[${timestamp()}] [DEBUG] ${message}\n`);
   }
 
   private async perform(
@@ -96,6 +116,7 @@ export class RemoteOpenClawProvider implements OpenClawProvider {
     dryRun: boolean,
   ): Promise<RemoteOperationResponse> {
     if (dryRun) {
+      this.debug(`REMOTE DRY-RUN op=${operation}`);
       return { ok: true };
     }
 
@@ -109,6 +130,8 @@ export class RemoteOpenClawProvider implements OpenClawProvider {
       recipe_version: config.version,
       payload,
     };
+    const startedAt = Date.now();
+    this.debug(`REMOTE START op=${operation} url=${operationUrl(remote)}`);
 
     try {
       const response = await fetch(operationUrl(remote), {
@@ -130,8 +153,11 @@ export class RemoteOpenClawProvider implements OpenClawProvider {
         throw new ClawChefError(`Remote operation failed for ${operation}: ${parsed.message ?? "unknown error"}`);
       }
 
+      this.debug(`REMOTE DONE op=${operation} status=${response.status} (${Date.now() - startedAt}ms)`);
+
       return parsed;
     } catch (err) {
+      this.debug(`REMOTE FAIL op=${operation} (${Date.now() - startedAt}ms)`);
       if (err instanceof ClawChefError) {
         throw err;
       }
@@ -190,6 +216,10 @@ export class RemoteOpenClawProvider implements OpenClawProvider {
 
   async configureChannel(config: OpenClawSection, channel: ChannelDef, dryRun: boolean): Promise<void> {
     await this.perform(config, "configure_channel", { channel }, dryRun);
+  }
+
+  async applyConfigPatch(config: OpenClawSection, patch: Record<string, unknown>, dryRun: boolean): Promise<void> {
+    await this.perform(config, "apply_config_patch", { patch }, dryRun);
   }
 
   async bindChannelAgent(config: OpenClawSection, channel: ChannelDef, agent: string, dryRun: boolean): Promise<void> {

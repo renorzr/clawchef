@@ -64,6 +64,7 @@ export interface OpenClawSection {
   install?: InstallPolicy;
   plugins?: string[];
   root?: OpenClawRootDef;
+  config_patch?: Record<string, unknown>;
   bootstrap?: OpenClawBootstrap;
   commands?: OpenClawCommandOverrides;
 }

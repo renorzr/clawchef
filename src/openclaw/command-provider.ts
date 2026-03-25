@@ -50,6 +50,26 @@ interface BindingItem {
 const SECRET_FLAG_RE =
   /(--[A-Za-z0-9-]*(?:api-key|token|password|secret)[A-Za-z0-9-]*\s+)(?:'[^']*'|"[^"]*"|\S+)/g;
 
+let TRACE_VERBOSE = false;
+
+function timestamp(): string {
+  const now = new Date();
+  const year = now.getFullYear();
+  const month = String(now.getMonth() + 1).padStart(2, "0");
+  const day = String(now.getDate()).padStart(2, "0");
+  const hours = String(now.getHours()).padStart(2, "0");
+  const minutes = String(now.getMinutes()).padStart(2, "0");
+  const seconds = String(now.getSeconds()).padStart(2, "0");
+  return `${year}-${month}-${day} ${hours}:${minutes}:${seconds}`;
+}
+
+function traceDebug(message: string): void {
+  if (!TRACE_VERBOSE) {
+    return;
+  }
+  process.stdout.write(`[${timestamp()}] [DEBUG] ${message}\n`);
+}
+
 type BootstrapStringField =
   | "cloudflare_ai_gateway_account_id"
   | "cloudflare_ai_gateway_gateway_id"
@@ -111,9 +131,14 @@ async function commandExists(bin: string): Promise<boolean> {
 }
 
 async function runShell(command: string, dryRun: boolean, extraEnv?: Record<string, string>): Promise<string> {
+  const sanitized = sanitizeCommand(command);
   if (dryRun) {
+    traceDebug(`CMD DRY-RUN: ${sanitized}`);
     return "";
   }
+
+  const startedAt = Date.now();
+  traceDebug(`CMD START: ${sanitized}`);
 
   return new Promise<string>((resolve, reject) => {
     const child = spawn(command, {
@@ -135,18 +160,25 @@ async function runShell(command: string, dryRun: boolean, extraEnv?: Record<stri
     });
     child.on("close", (code) => {
       if (code === 0) {
+        traceDebug(`CMD DONE (${Date.now() - startedAt}ms): ${sanitized}`);
         resolve(stdout.trim());
         return;
       }
+      traceDebug(`CMD FAIL (${Date.now() - startedAt}ms) code=${String(code)}: ${sanitized}`);
       reject(new ClawChefError(`Command failed (${code}): ${sanitizeCommand(command)}\n${stderr.trim()}`));
     });
   });
 }
 
 async function runShellInteractive(command: string, dryRun: boolean): Promise<void> {
+  const sanitized = sanitizeCommand(command);
   if (dryRun) {
+    traceDebug(`CMD DRY-RUN (interactive): ${sanitized}`);
     return;
   }
+
+  const startedAt = Date.now();
+  traceDebug(`CMD START (interactive): ${sanitized}`);
 
   return new Promise<void>((resolve, reject) => {
     const child = spawn(command, {
@@ -160,9 +192,11 @@ async function runShellInteractive(command: string, dryRun: boolean): Promise<vo
     });
     child.on("close", (code) => {
       if (code === 0) {
+        traceDebug(`CMD DONE (interactive, ${Date.now() - startedAt}ms): ${sanitized}`);
         resolve();
         return;
       }
+      traceDebug(`CMD FAIL (interactive, ${Date.now() - startedAt}ms) code=${String(code)}: ${sanitized}`);
       reject(new ClawChefError(`Command failed (${code}): ${sanitizeCommand(command)}`));
     });
   });
@@ -204,6 +238,76 @@ function shouldAutoDisableTelegramChannel(channel: ChannelDef): boolean {
 }
 
 type VersionMismatchChoice = "ignore" | "abort" | "force";
+
+type JsonPatchValue = null | boolean | number | string | JsonPatchValue[] | { [key: string]: JsonPatchValue };
+
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function isValidConfigPathToken(value: string): boolean {
+  return /^[A-Za-z0-9_-]+$/.test(value);
+}
+
+function appendPath(base: string, key: string): string {
+  if (!isValidConfigPathToken(key)) {
+    throw new ClawChefError(`Unsupported config patch key for path token: ${key}`);
+  }
+  if (!base) {
+    return key;
+  }
+  if (/^[A-Za-z_][A-Za-z0-9_]*$/.test(key)) {
+    return `${base}.${key}`;
+  }
+  return `${base}[${key}]`;
+}
+
+function toJsonPatchValue(value: unknown, pathLabel: string): JsonPatchValue {
+  if (
+    value === null ||
+    typeof value === "string" ||
+    typeof value === "number" ||
+    typeof value === "boolean"
+  ) {
+    return value;
+  }
+  if (Array.isArray(value)) {
+    return value.map((item, index) => toJsonPatchValue(item, `${pathLabel}[${index}]`));
+  }
+  if (isPlainObject(value)) {
+    const out: { [key: string]: JsonPatchValue } = {};
+    for (const [k, v] of Object.entries(value)) {
+      out[k] = toJsonPatchValue(v, `${pathLabel}.${k}`);
+    }
+    return out;
+  }
+  throw new ClawChefError(`openclaw.config_patch contains unsupported value at ${pathLabel}`);
+}
+
+async function applyConfigPatchAtPath(
+  bin: string,
+  basePath: string,
+  value: JsonPatchValue,
+  dryRun: boolean,
+): Promise<void> {
+  if (isPlainObject(value)) {
+    const entries = Object.entries(value);
+    if (entries.length === 0) {
+      const cmd = `${bin} config set ${shellQuote(basePath)} '${"{}"}' --strict-json`;
+      await runShell(cmd, dryRun);
+      return;
+    }
+    for (const [k, nested] of entries) {
+      const nextPath = appendPath(basePath, k);
+      await applyConfigPatchAtPath(bin, nextPath, nested, dryRun);
+    }
+    return;
+  }
+
+  const payload = JSON.stringify(value);
+  const cmd = `${bin} config set ${shellQuote(basePath)} ${shellQuote(payload)} --strict-json`;
+  await runShell(cmd, dryRun);
+}
 
 async function chooseVersionMismatchAction(
   currentVersion: string,
@@ -356,6 +460,10 @@ function parseBindingsJson(raw: string): BindingItem[] {
 
 export class CommandOpenClawProvider implements OpenClawProvider {
   private readonly stagedMessages = new Map<string, StagedMessage[]>();
+
+  constructor(verboseEnabled = false) {
+    TRACE_VERBOSE = verboseEnabled;
+  }
 
   async ensureVersion(
     config: OpenClawSection,
@@ -597,6 +705,19 @@ export class CommandOpenClawProvider implements OpenClawProvider {
       const policyValue = JSON.stringify(channel.group_policy);
       const setPolicyCmd = `${bin} config set ${shellQuote(configPath)} ${shellQuote(policyValue)} --strict-json`;
       await runShell(setPolicyCmd, dryRun);
+    }
+  }
+
+  async applyConfigPatch(config: OpenClawSection, patch: Record<string, unknown>, dryRun: boolean): Promise<void> {
+    const bin = config.bin ?? "openclaw";
+    const normalized = toJsonPatchValue(patch, "openclaw.config_patch");
+    if (!isPlainObject(normalized)) {
+      throw new ClawChefError("openclaw.config_patch must be an object");
+    }
+
+    for (const [k, v] of Object.entries(normalized)) {
+      const path = appendPath("", k);
+      await applyConfigPatchAtPath(bin, path, v, dryRun);
     }
   }
 

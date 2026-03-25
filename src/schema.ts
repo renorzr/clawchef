@@ -78,6 +78,7 @@ const openClawSchema = z
     install: z.enum(["auto", "always", "never"]).optional(),
     plugins: z.array(z.string().min(1)).optional(),
     root: openClawRootSchema.optional(),
+    config_patch: z.record(z.unknown()).optional(),
     bootstrap: openClawBootstrapSchema.optional(),
     commands: openClawCommandsSchema.optional(),
   })

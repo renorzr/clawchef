@@ -447,6 +447,11 @@ export async function runRecipe(
     }
   }
 
+  if (!filesOnlyScope && recipe.openclaw.config_patch) {
+    await provider.applyConfigPatch(recipe.openclaw, recipe.openclaw.config_patch, options.dryRun);
+    logger.info("OpenClaw config patch applied");
+  }
+
   for (const workspace of recipe.workspaces ?? []) {
     const wsPath = workspacePaths.get(workspace.name);
     if (!wsPath) {

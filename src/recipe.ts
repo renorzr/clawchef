@@ -73,6 +73,33 @@ const CHANNEL_SECRET_FIELDS = ["token", "bot_token", "access_token", "app_token"
 
 const TEMPLATE_TOKEN_RE = /\$\{[A-Za-z_][A-Za-z0-9_]*\}/;
 
+function assertNoInlineSecretsInObject(value: unknown, pathLabel: string): void {
+  if (Array.isArray(value)) {
+    for (let i = 0; i < value.length; i += 1) {
+      assertNoInlineSecretsInObject(value[i], `${pathLabel}[${i}]`);
+    }
+    return;
+  }
+  if (!value || typeof value !== "object") {
+    return;
+  }
+
+  for (const [key, nestedValue] of Object.entries(value)) {
+    const nextPath = `${pathLabel}.${key}`;
+    if (
+      typeof nestedValue === "string" &&
+      /(token|password|secret|api[_-]?key|webhook)/i.test(key) &&
+      nestedValue.trim().length > 0 &&
+      !TEMPLATE_TOKEN_RE.test(nestedValue)
+    ) {
+      throw new ClawChefError(
+        `Inline secret in ${nextPath} is not allowed. Use \${var} and pass it via --var or CLAWCHEF_VAR_*`,
+      );
+    }
+    assertNoInlineSecretsInObject(nestedValue, nextPath);
+  }
+}
+
 function hasExplicitEmptyTelegramToken(channel: ChannelDef): boolean {
   if (channel.channel !== "telegram") {
     return false;
@@ -96,6 +123,10 @@ function assertNoInlineSecrets(recipe: Recipe): void {
         );
       }
     }
+  }
+
+  if (recipe.openclaw.config_patch) {
+    assertNoInlineSecretsInObject(recipe.openclaw.config_patch, "openclaw.config_patch");
   }
 
   for (const channel of recipe.channels ?? []) {

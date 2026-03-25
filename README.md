@@ -8,6 +8,7 @@ Recipe-driven OpenClaw environment orchestrator.
 - Accepts recipe input from local file/dir/archive and HTTP URL/archive.
 - Resolves `${var}` parameters from `--var`, environment, and defaults.
 - Auto-loads environment variables from `.env` in the current working directory.
+- `--verbose` prints step-level debug logs including executed commands and operation timing.
 - Supports loading env vars from a custom `.env` path/URL via `--dotenv-ref`.
 - Requires secrets to be injected via `--var` / `CLAWCHEF_VAR_*` (no inline secrets in recipe).
 - Prepares OpenClaw version (install or reuse).
@@ -442,6 +443,36 @@ Supported common fields:
 If `agent` is set and `account` is omitted, clawchef defaults `account` to the same value as `agent`.
 `channels[].group_policy` currently supports `channel: "telegram"` only and is applied after `channels add` via `openclaw config set` so it is not overwritten by add-flow writes.
 If `channel: "telegram"` has `token: ""` or `bot_token: ""`, clawchef auto-disables that telegram account (`enabled=false`) and skips channel add/bind.
+
+## OpenClaw config patch
+
+Use `openclaw.config_patch` to apply a deep config patch to active OpenClaw config (same target used by `openclaw config set`).
+
+Merge behavior:
+
+- objects: merged recursively by setting nested keys
+- arrays: replaced as a whole
+- scalars: replaced
+
+Applied during `cook` after channel setup and before gateway start. Not applied in `--scope files`.
+
+```yaml
+openclaw:
+  version: "2026.3.2"
+  config_patch:
+    channels:
+      telegram:
+        accounts:
+          frontend-dev:
+            capabilities:
+              inlineButtons: "all"
+            groups:
+              "*":
+                requireMention: false
+                enabled: true
+            actions:
+              sendMessage: true
+```
 
 ## Workspace path behavior
 
