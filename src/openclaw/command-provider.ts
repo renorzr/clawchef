@@ -1,7 +1,7 @@
 import { homedir, tmpdir } from "node:os";
 import path from "node:path";
 import process from "node:process";
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { spawn } from "node:child_process";
 import { createInterface } from "node:readline/promises";
 import { stdin as input, stdout as output } from "node:process";
@@ -240,26 +240,152 @@ function shouldAutoDisableTelegramChannel(channel: ChannelDef): boolean {
 type VersionMismatchChoice = "ignore" | "abort" | "force";
 
 type JsonPatchValue = null | boolean | number | string | JsonPatchValue[] | { [key: string]: JsonPatchValue };
+type ConfigJson = { [key: string]: unknown };
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-function isValidConfigPathToken(value: string): boolean {
-  return /^[A-Za-z0-9_-]+$/.test(value);
+function splitConfigPath(pathExpression: string): string[] {
+  const segments: string[] = [];
+  let token = "";
+  for (let i = 0; i < pathExpression.length; i += 1) {
+    const ch = pathExpression[i];
+    if (ch === ".") {
+      if (token) {
+        segments.push(token);
+        token = "";
+      }
+      continue;
+    }
+    if (ch === "[") {
+      if (token) {
+        segments.push(token);
+        token = "";
+      }
+      const end = pathExpression.indexOf("]", i + 1);
+      if (end < 0) {
+        throw new ClawChefError(`Invalid config path expression: ${pathExpression}`);
+      }
+      const bracketToken = pathExpression.slice(i + 1, end).trim();
+      if (!bracketToken) {
+        throw new ClawChefError(`Invalid empty bracket token in config path: ${pathExpression}`);
+      }
+      segments.push(bracketToken);
+      i = end;
+      continue;
+    }
+    token += ch;
+  }
+  if (token) {
+    segments.push(token);
+  }
+  if (segments.length === 0) {
+    throw new ClawChefError(`Invalid config path expression: ${pathExpression}`);
+  }
+  return segments;
 }
 
-function appendPath(base: string, key: string): string {
-  if (!isValidConfigPathToken(key)) {
-    throw new ClawChefError(`Unsupported config patch key for path token: ${key}`);
+function getConfigValue(root: unknown, pathExpression: string): unknown {
+  const segments = splitConfigPath(pathExpression);
+  let cursor: unknown = root;
+  for (const segment of segments) {
+    if (!isPlainObject(cursor)) {
+      return undefined;
+    }
+    cursor = (cursor as Record<string, unknown>)[segment];
   }
-  if (!base) {
-    return key;
+  return cursor;
+}
+
+function setConfigValue(root: ConfigJson, pathExpression: string, value: unknown): void {
+  const segments = splitConfigPath(pathExpression);
+  let cursor: Record<string, unknown> = root;
+
+  for (let i = 0; i < segments.length - 1; i += 1) {
+    const segment = segments[i];
+    const existing = cursor[segment];
+    if (isPlainObject(existing)) {
+      cursor = existing;
+      continue;
+    }
+    const next: Record<string, unknown> = {};
+    cursor[segment] = next;
+    cursor = next;
   }
-  if (/^[A-Za-z_][A-Za-z0-9_]*$/.test(key)) {
-    return `${base}.${key}`;
+
+  cursor[segments[segments.length - 1]] = value;
+}
+
+function deepMergeConfig(base: unknown, patch: JsonPatchValue): JsonPatchValue {
+  if (!isPlainObject(patch)) {
+    return patch;
   }
-  return `${base}[${key}]`;
+
+  const baseObject = isPlainObject(base) ? base : {};
+  const result: Record<string, JsonPatchValue> = {};
+
+  for (const [k, v] of Object.entries(baseObject)) {
+    result[k] = toJsonPatchValue(v, `base.${k}`);
+  }
+
+  for (const [k, v] of Object.entries(patch)) {
+    const current = result[k];
+    if (isPlainObject(v) && isPlainObject(current)) {
+      result[k] = deepMergeConfig(current, v);
+    } else {
+      result[k] = v;
+    }
+  }
+
+  return result;
+}
+
+function configPath(): string {
+  const fromEnv = process.env.OPENCLAW_CONFIG_PATH?.trim();
+  if (fromEnv) {
+    return fromEnv;
+  }
+  return path.join(homedir(), ".openclaw", "openclaw.json");
+}
+
+async function loadConfigJson(configFilePath: string): Promise<ConfigJson> {
+  let raw: string;
+  try {
+    raw = await readFile(configFilePath, "utf8");
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    throw new ClawChefError(`Failed to read OpenClaw config at ${configFilePath}: ${message}`);
+  }
+
+  try {
+    const parsed = JSON.parse(raw) as unknown;
+    if (!isPlainObject(parsed)) {
+      throw new ClawChefError(`OpenClaw config root must be an object: ${configFilePath}`);
+    }
+    return parsed;
+  } catch (err) {
+    if (err instanceof ClawChefError) {
+      throw err;
+    }
+    const message = err instanceof Error ? err.message : String(err);
+    throw new ClawChefError(`Failed to parse OpenClaw config JSON at ${configFilePath}: ${message}`);
+  }
+}
+
+async function saveConfigJson(configFilePath: string, config: ConfigJson, dryRun: boolean): Promise<void> {
+  if (dryRun) {
+    traceDebug(`CONFIG DRY-RUN write: ${configFilePath}`);
+    return;
+  }
+
+  const dir = path.dirname(configFilePath);
+  await mkdir(dir, { recursive: true });
+  const tempPath = `${configFilePath}.tmp-${process.pid}-${Date.now()}`;
+  const payload = `${JSON.stringify(config, null, 2)}\n`;
+  await writeFile(tempPath, payload, "utf8");
+  await rename(tempPath, configFilePath);
+  traceDebug(`CONFIG WRITE: ${configFilePath}`);
 }
 
 function toJsonPatchValue(value: unknown, pathLabel: string): JsonPatchValue {
@@ -282,31 +408,6 @@ function toJsonPatchValue(value: unknown, pathLabel: string): JsonPatchValue {
     return out;
   }
   throw new ClawChefError(`openclaw.config_patch contains unsupported value at ${pathLabel}`);
-}
-
-async function applyConfigPatchAtPath(
-  bin: string,
-  basePath: string,
-  value: JsonPatchValue,
-  dryRun: boolean,
-): Promise<void> {
-  if (isPlainObject(value)) {
-    const entries = Object.entries(value);
-    if (entries.length === 0) {
-      const cmd = `${bin} config set ${shellQuote(basePath)} '${"{}"}' --strict-json`;
-      await runShell(cmd, dryRun);
-      return;
-    }
-    for (const [k, nested] of entries) {
-      const nextPath = appendPath(basePath, k);
-      await applyConfigPatchAtPath(bin, nextPath, nested, dryRun);
-    }
-    return;
-  }
-
-  const payload = JSON.stringify(value);
-  const cmd = `${bin} config set ${shellQuote(basePath)} ${shellQuote(payload)} --strict-json`;
-  await runShell(cmd, dryRun);
 }
 
 async function chooseVersionMismatchAction(
@@ -442,20 +543,14 @@ function isAccountLevelBinding(item: BindingItem, channel: string, account: stri
   );
 }
 
-function parseBindingsJson(raw: string): BindingItem[] {
-  if (!raw.trim()) {
+function parseBindingsValue(value: unknown): BindingItem[] {
+  if (value === undefined || value === null) {
     return [];
   }
-  try {
-    const parsed = JSON.parse(raw) as unknown;
-    if (!Array.isArray(parsed)) {
-      throw new ClawChefError("openclaw config bindings is not an array");
-    }
-    return parsed as BindingItem[];
-  } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
-    throw new ClawChefError(`Failed to parse openclaw bindings JSON: ${message}`);
+  if (!Array.isArray(value)) {
+    throw new ClawChefError("openclaw config bindings is not an array");
   }
+  return value as BindingItem[];
 }
 
 export class CommandOpenClawProvider implements OpenClawProvider {
@@ -636,11 +731,12 @@ export class CommandOpenClawProvider implements OpenClawProvider {
 
   async configureChannel(config: OpenClawSection, channel: ChannelDef, dryRun: boolean): Promise<void> {
     const bin = config.bin ?? "openclaw";
+    const cfgPath = configPath();
 
     if (shouldAutoDisableTelegramChannel(channel)) {
-      const enabledPath = telegramEnabledPath(channel.account);
-      const disableCmd = `${bin} config set ${shellQuote(enabledPath)} false --strict-json`;
-      await runShell(disableCmd, dryRun);
+      const openclawConfig = await loadConfigJson(cfgPath);
+      setConfigValue(openclawConfig, telegramEnabledPath(channel.account), false);
+      await saveConfigJson(cfgPath, openclawConfig, dryRun);
       return;
     }
 
@@ -705,24 +801,25 @@ export class CommandOpenClawProvider implements OpenClawProvider {
     await runShell(cmd, dryRun);
 
     if (channel.channel === "telegram" && channel.group_policy) {
-      const configPath = telegramGroupPolicyPath(channel.account);
-      const policyValue = JSON.stringify(channel.group_policy);
-      const setPolicyCmd = `${bin} config set ${shellQuote(configPath)} ${shellQuote(policyValue)} --strict-json`;
-      await runShell(setPolicyCmd, dryRun);
+      const openclawConfig = await loadConfigJson(cfgPath);
+      setConfigValue(openclawConfig, telegramGroupPolicyPath(channel.account), channel.group_policy);
+      await saveConfigJson(cfgPath, openclawConfig, dryRun);
     }
   }
 
   async applyConfigPatch(config: OpenClawSection, patch: Record<string, unknown>, dryRun: boolean): Promise<void> {
-    const bin = config.bin ?? "openclaw";
     const normalized = toJsonPatchValue(patch, "openclaw.config_patch");
     if (!isPlainObject(normalized)) {
       throw new ClawChefError("openclaw.config_patch must be an object");
     }
 
-    for (const [k, v] of Object.entries(normalized)) {
-      const path = appendPath("", k);
-      await applyConfigPatchAtPath(bin, path, v, dryRun);
+    const cfgPath = configPath();
+    const openclawConfig = await loadConfigJson(cfgPath);
+    const merged = deepMergeConfig(openclawConfig, normalized);
+    if (!isPlainObject(merged)) {
+      throw new ClawChefError("Merged OpenClaw config must be an object");
     }
+    await saveConfigJson(cfgPath, merged, dryRun);
   }
 
   async bindChannelAgents(config: OpenClawSection, bindingsInput: ChannelAgentBinding[], dryRun: boolean): Promise<void> {
@@ -730,7 +827,6 @@ export class CommandOpenClawProvider implements OpenClawProvider {
       return;
     }
 
-    const bin = config.bin ?? "openclaw";
     const customTemplate = config.commands?.bind_channel_agent;
     if (customTemplate?.trim()) {
       for (const binding of bindingsInput) {
@@ -739,13 +835,9 @@ export class CommandOpenClawProvider implements OpenClawProvider {
       return;
     }
 
-    if (dryRun) {
-      return;
-    }
-
-    const getCmd = `${bin} config get bindings --json 2>/dev/null || printf '[]'`;
-    const rawBindings = await runShell(getCmd, false);
-    const bindings = parseBindingsJson(rawBindings);
+    const cfgPath = configPath();
+    const openclawConfig = await loadConfigJson(cfgPath);
+    const bindings = parseBindingsValue(getConfigValue(openclawConfig, "bindings"));
 
     for (const binding of bindingsInput) {
       const account = binding.channel.account?.trim();
@@ -761,7 +853,7 @@ export class CommandOpenClawProvider implements OpenClawProvider {
         },
       };
 
-      const index = bindings.findIndex((item) => isAccountLevelBinding(item, binding.channel.channel, account));
+      const index = bindings.findIndex((item: BindingItem) => isAccountLevelBinding(item, binding.channel.channel, account));
       if (index >= 0) {
         bindings[index] = nextBinding;
       } else {
@@ -769,9 +861,8 @@ export class CommandOpenClawProvider implements OpenClawProvider {
       }
     }
 
-    const json = JSON.stringify(bindings);
-    const setCmd = `${bin} config set bindings ${shellQuote(json)} --json`;
-    await runShell(setCmd, false);
+    setConfigValue(openclawConfig, "bindings", bindings);
+    await saveConfigJson(cfgPath, openclawConfig, dryRun);
   }
 
   async bindChannelAgent(config: OpenClawSection, channel: ChannelDef, agent: string, dryRun: boolean): Promise<void> {
